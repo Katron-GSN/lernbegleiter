@@ -82,8 +82,9 @@ export async function collect(env, fetchFn = fetch, now = new Date()) {
       if (!res.ok) throw new Error('itslearning HTTP ' + res.status);
       const events = parseICS(await res.text());
       out.assignments = events
-        .filter(e => e.start && e.start >= ymd(from) && e.start <= ymd(addDays(now, 60)))
-        .map(e => ({ id: 'itsl:' + e.uid, title: e.summary, due: e.start, course: e.location || e.categories || '', info: e.description || '' }));
+        .map(e => ({ ...e, due: e.end && e.end >= e.start ? e.end : e.start }))
+        .filter(e => e.due && e.due >= ymd(from) && e.start <= ymd(addDays(now, 60)))
+        .map(e => ({ id: 'itsl:' + e.uid, title: e.summary, due: e.due, start: e.start, course: e.location || e.categories || '', info: e.description || '' }));
     } catch (e) {
       out.errors.push({ source: 'itslearning', message: String(e.message || e) });
     }
@@ -320,9 +321,19 @@ export function parseICS(text) {
     else if (name === 'LOCATION') cur.location = value;
     else if (name === 'CATEGORIES') cur.categories = value;
     else if (name === 'DTSTART') cur.start = icsDate(value);
-    else if (name === 'DTEND') cur.end = icsDate(value);
+    else if (name === 'DTEND') {
+      cur.end = icsDate(value);
+      // Ganztägige Termine: DTEND ist der Tag NACH dem letzten Tag
+      if (cur.end && /^\d{8}$/.test(value.trim())) cur.end = shiftDay(cur.end, -1);
+    }
   }
   return events.map(e => ({ ...e, uid: e.uid || `${e.start}-${e.summary}` }));
+}
+
+function shiftDay(isoDay, n) {
+  const d = new Date(isoDay + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 function icsDate(v) {

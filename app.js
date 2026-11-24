@@ -133,6 +133,7 @@ function matchSubject(name, short) {
   return S.subjects.find(s => s.short && k && s.short.toLowerCase() === k)
     || S.subjects.find(s => s.name.toLowerCase() === n || (k && s.name.toLowerCase() === k))
     || S.subjects.find(s => n && (s.name.toLowerCase().startsWith(n) || n.startsWith(s.name.toLowerCase())))
+    || S.subjects.find(s => n.length > 3 && n.includes(s.name.toLowerCase()))
     || S.subjects.find(s => k.length >= 1 && s.name.toLowerCase().startsWith(k))
     || null;
 }
@@ -997,6 +998,12 @@ function syncStatusText() {
 function applySync(data) {
   const today = todayISO();
   S.sync = { updated: data.updated, fetchedAt: Date.now(), lessons: data.lessons || [], errors: data.errors || [], debug: data.debug || null };
+  // Fächer aus WebUntis, die die App noch nicht kennt, automatisch anlegen (Ranzen-Sachen kann Paul unter „Plan“ ergänzen)
+  (data.lessons || []).forEach(l => {
+    if (l.subject && !matchSubject(l.subject, l.short)) {
+      S.subjects.push({ id: uid(), name: l.subject, short: l.short || '', color: COLORS[S.subjects.length % COLORS.length], items: [] });
+    }
+  });
   const longOf = k => ((data.lessons || []).find(l => l.short && l.short === k) || {}).subject || k;
   const incoming = [
     ...(data.homework || []).map(h => ({ id: h.id, subjectId: matchSubject(longOf(h.subject), h.subject)?.id || '', text: h.text, due: h.due, source: 'webuntis' })),
