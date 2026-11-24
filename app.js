@@ -668,24 +668,32 @@ function openEventDialog(id) {
 
 /* ---------- Ansicht: Plan ---------- */
 
+let planWeekOffset = 0;
 function syncedWeek() {
-  const days = [];
-  let d = targetDay().date;
-  for (let i = 0; i < 20 && days.length < 5; i++) {
-    if (S.sync.lessons.some(l => l.date === d)) days.push(d);
-    d = addDays(d, 1);
-  }
-  if (!days.length) return '';
+  const mon = addDays(mondayOf(targetDay().date), 7 * planWeekOffset);
+  const days = [0, 1, 2, 3, 4].map(i => addDays(mon, i));
+  const today = todayISO();
+  const kw = isoWeekKey(mon).split('-W')[1];
   return `<section class="card">
-    <div class="card-head"><h2>Die nächsten Schultage</h2><span class="tag">aus WebUntis · ${esc(syncStatusText().replace(/ · Probleme.*$/, ''))}</span></div>
-    <div class="week-plan">${days.map(day => `
-      <div class="wp-day">
-        <h3>${fmtDate(day)}</h3>
-        <div class="lessons">${lessonsOn(day).map(l => `
-          <div class="lesson ${l.status || ''}"><span class="nr">${esc(l.time || String(l.nr))}</span><span class="subj">${subjectDot(l.subj)}<span class="nm">${esc(l.subj.name)}</span>
-            ${l.status === 'cancelled' ? '<span class="flag bad">fällt aus</span>' : l.status === 'changed' ? '<span class="flag warn">geändert</span>' : ''}</span>
-            ${l.info ? `<span class="info">${esc(l.info)}</span>` : ''}</div>`).join('')}</div>
-      </div>`).join('')}</div>
+    <div class="card-head">
+      <h2>Woche ${Number(kw)} · ${fmtDate(days[0], false)} bis ${fmtDate(days[4], false)}</h2>
+      <div class="row" style="gap:6px">
+        <button class="btn small" data-action="plan-week" data-dir="-1" ${planWeekOffset <= -1 ? 'disabled' : ''} aria-label="Woche zurück">‹</button>
+        <button class="btn small" data-action="plan-week" data-dir="0" ${planWeekOffset === 0 ? 'disabled' : ''}>Aktuell</button>
+        <button class="btn small" data-action="plan-week" data-dir="1" ${planWeekOffset >= 1 ? 'disabled' : ''} aria-label="Woche vor">›</button>
+      </div>
+    </div>
+    <div class="week-plan-wrap"><div class="week-plan">${days.map(day => {
+      const ls = lessonsOn(day);
+      return `<div class="wp-day ${day === today ? 'today' : ''}">
+        <h3>${WD_SHORT[parse(day).getDay()]}, ${parse(day).getDate()}.${day === today ? ' · heute' : ''}</h3>
+        ${ls.length ? `<div class="lessons">${ls.map(l => `
+          <div class="lesson ${l.status || ''}"><span class="nr">${esc(l.time || String(l.nr))}</span><span class="subj">${subjectDot(l.subj)}<span class="nm">${esc(l.subj.name)}</span></span>
+            ${l.status === 'cancelled' ? '<span class="info bad">fällt aus</span>' : ''}${l.info && l.status !== 'cancelled' ? `<span class="info">${esc(l.info)}</span>` : ''}</div>`).join('')}</div>`
+        : `<p class="empty small">${inHoliday(day) ? 'Ferien 🌴' : 'Keine Daten'}</p>`}
+      </div>`;
+    }).join('')}</div></div>
+    <p class="muted small">${esc(syncStatusText().replace(/ · Probleme.*$/, ''))} · aus WebUntis</p>
   </section>`;
 }
 
@@ -1014,7 +1022,7 @@ function applySync(data) {
   incoming.forEach(h => {
     const ex = S.homework.find(x => x.id === h.id);
     if (ex) { ex.text = h.text; ex.due = h.due; if (!ex.subjectId) ex.subjectId = h.subjectId; }
-    else { S.homework.push({ ...h, created: today, self: false, doneAt: null }); added++; }
+    else if (h.due >= today) { S.homework.push({ ...h, created: today, self: false, doneAt: null }); added++; }
   });
   // Importierte Einträge, die die Schule entfernt hat und die schon vorbei sind, nicht als „überfällig“ stehen lassen.
   S.homework = S.homework.filter(h => !h.source || h.doneAt || ids.has(h.id) || h.due >= today);
@@ -1146,6 +1154,12 @@ document.addEventListener('click', ev => {
       break;
     case 'export': exportData(); break;
     case 'sync': syncNow(true); break;
+    case 'plan-week': {
+      const dir = Number(el.dataset.dir);
+      planWeekOffset = dir === 0 ? 0 : Math.max(-1, Math.min(1, planWeekOffset + dir));
+      render();
+      break;
+    }
   }
 });
 

@@ -18,8 +18,8 @@
  * Normale Variable (wrangler.toml): ALLOWED_ORIGIN
  */
 
-const DAYS_BACK = 1;
-const DAYS_AHEAD = 14;
+const DAYS_BACK = 7;  // ganze aktuelle Schulwoche ab Montag
+const DAYS_AHEAD = 18; // plus komplette nächste Woche (auch freitags)
 export const CACHE_SECONDS = 600;
 
 /* Plattformunabhängiger Kern.

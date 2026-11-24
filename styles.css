@@ -223,7 +223,13 @@ dialog form { display: grid; gap: 14px; }
 .flag.warn { color: var(--warn); }
 .src { font-size: .75rem; padding: 0 6px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); }
 
-.week-plan { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.week-plan-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; padding: 0 4px; }
+.week-plan { display: grid; gap: 8px; grid-template-columns: repeat(5, minmax(140px, 1fr)); min-width: 720px; }
+.wp-day { padding: 6px; border-radius: 12px; }
+.wp-day.today { outline: 2px solid var(--accent); }
+.wp-day .lesson { grid-template-columns: auto 1fr; }
+.wp-day .lesson .nr { font-size: .8rem; }
+.info.bad { color: var(--bad); }
 .wp-day { display: grid; gap: 6px; align-content: start; }
 .wp-day h3 { font-size: .9rem; color: var(--muted); }
 .wp-day .lesson { padding: 6px 8px; font-size: .9rem; }
