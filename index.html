@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Lernbegleiter</title>
+  <meta name="description" content="Dein Schultag auf einen Blick: Stundenplan, Ranzen, Hausaufgaben, Termine und XP.">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Lernbegleiter">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>Lernbegleiter</span>
+    </div>
+    <button class="xp-pill" id="xp-pill" data-go="me" aria-label="Fortschritt anzeigen"></button>
+  </header>
+
+  <main id="view" tabindex="-1"></main>
+
+  <nav class="tabbar" aria-label="Hauptnavigation">
+    <button data-go="today"><span class="ico" aria-hidden="true">☀️</span><span>Heute</span></button>
+    <button data-go="homework"><span class="ico" aria-hidden="true">📝</span><span>Aufgaben</span></button>
+    <button data-go="events"><span class="ico" aria-hidden="true">📅</span><span>Termine</span></button>
+    <button data-go="plan"><span class="ico" aria-hidden="true">🗓️</span><span>Plan</span></button>
+    <button data-go="me"><span class="ico" aria-hidden="true">🤖</span><span>Ich</span></button>
+  </nav>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <dialog id="dialog"></dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
