@@ -1,6 +1,9 @@
 name = "lernbegleiter-sync"
 main = "src/index.js"
 compatibility_date = "2025-06-01"
+# Im Dashboard angelegte Variablen beim Bereitstellen nicht löschen
+keep_vars = true
 
 [vars]
 ALLOWED_ORIGIN = "https://nb-gsn.github.io"
+UNTIS_SERVER = "gsnpb.webuntis.com"
