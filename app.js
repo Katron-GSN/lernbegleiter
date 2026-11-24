@@ -967,13 +967,13 @@ function syncStatusText() {
   if (!S.settings.syncUrl || !S.settings.syncKey) return 'Noch nicht eingerichtet';
   if (!S.sync || !S.sync.fetchedAt) return 'Noch nie abgerufen';
   const d = new Date(S.sync.fetchedAt);
-  const errs = (S.sync.errors || []).map(e => e.source).join(', ');
+  const errs = (S.sync.errors || []).map(e => e.source + (e.message ? ' (' + e.message + ')' : '')).join('; ');
   return `Stand: ${fmtDate(iso(d), false)}, ${pad(d.getHours())}:${pad(d.getMinutes())} Uhr${errs ? ' · Probleme: ' + errs : ''}`;
 }
 
 function applySync(data) {
   const today = todayISO();
-  S.sync = { updated: data.updated, fetchedAt: Date.now(), lessons: data.lessons || [], errors: data.errors || [] };
+  S.sync = { updated: data.updated, fetchedAt: Date.now(), lessons: data.lessons || [], errors: data.errors || [], debug: data.debug || null };
   const longOf = k => ((data.lessons || []).find(l => l.short && l.short === k) || {}).subject || k;
   const incoming = [
     ...(data.homework || []).map(h => ({ id: h.id, subjectId: matchSubject(longOf(h.subject), h.subject)?.id || '', text: h.text, due: h.due, source: 'webuntis' })),

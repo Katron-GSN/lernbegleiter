@@ -69,7 +69,7 @@ export async function collect(env, fetchFn = fetch, now = new Date()) {
   if (env.UNTIS_SERVER && env.UNTIS_USER) {
     try {
       const u = await untis(env, fetchFn, from, to);
-      out.lessons = u.lessons; out.homework = u.homework; out.exams = u.exams;
+      out.lessons = u.lessons; out.homework = u.homework; out.exams = u.exams; out.debug = u.debug;
       out.errors.push(...u.errors);
     } catch (e) {
       out.errors.push({ source: 'webuntis', message: String(e.message || e) });
@@ -120,16 +120,22 @@ async function untis(env, fetchFn, from, to) {
 
   const out = { lessons: [], homework: [], exams: [] };
   const errors = [];
+  const debug = { personType, hasPersonId: !!personId };
 
   // REST-Endpunkte brauchen teils ein Token
   let bearer = '';
   try {
     const t = await fetchFn(`${base}/api/token/new`, { headers: { Cookie: cookie() } });
-    if (t.ok) bearer = (await t.text()).trim();
+    if (t.ok) bearer = (await t.text()).trim().replace(/^"|"$/g, '');
+    debug.token = !!bearer;
   } catch { /* optional */ }
   const rest = async path => {
     const headers = { Cookie: cookie(), Accept: 'application/json' };
-    if (bearer) headers.Authorization = 'Bearer ' + bearer;
+    if (bearer) {
+      headers.Authorization = 'Bearer ' + bearer;
+      const tenant = jwtClaim(bearer, 'tenant_id');
+      if (tenant) headers['Tenant-Id'] = String(tenant);
+    }
     const res = await fetchFn(base + path, { headers });
     if (!res.ok) throw new Error(`HTTP ${res.status} für ${path.split('?')[0]}`);
     return res.json();
@@ -146,7 +152,21 @@ async function untis(env, fetchFn, from, to) {
       }
     });
     out.lessons = mapTimetable(tt || []);
-  } catch (e) { errors.push({ source: 'webuntis-stundenplan', message: String(e.message || e) }); }
+    debug.timetableRpc = (tt || []).length;
+  } catch (e) { debug.timetableRpcError = String(e.message || e); }
+
+  // Zweiter Weg: neuere REST-Schnittstelle, die auch die WebUntis-Webseite nutzt
+  if (!out.lessons.length) {
+    try {
+      const q = `start=${ymd(from)}&end=${ymd(to)}&format=4&resourceType=STUDENT&resources=${personId}&periodTypes=&timetableType=MY_TIMETABLE`;
+      const data = await rest(`/api/rest/view/v1/timetable/entries?${q}`);
+      out.lessons = mapRestTimetable(data);
+      debug.timetableRest = out.lessons.length;
+    } catch (e) { debug.timetableRestError = String(e.message || e); }
+  }
+  if (!out.lessons.length) {
+    errors.push({ source: 'webuntis-stundenplan', message: debug.timetableRestError || debug.timetableRpcError || 'WebUntis hat keine Stunden geliefert' });
+  }
 
   try {
     const hw = await rest(`/api/homeworks/lessons?startDate=${untisDate(from)}&endDate=${untisDate(to)}`);
@@ -154,12 +174,26 @@ async function untis(env, fetchFn, from, to) {
   } catch (e) { errors.push({ source: 'webuntis-hausaufgaben', message: String(e.message || e) }); }
 
   try {
-    const ex = await rest(`/api/exams?studentId=${personId}&klasseId=-1&startDate=${untisDate(now0())}&endDate=${untisDate(addDays(now0(), 90))}&withGrades=false`);
+    const range = `startDate=${untisDate(now0())}&endDate=${untisDate(addDays(now0(), 90))}`;
+    let ex;
+    try { ex = await rest(`/api/exams?studentId=${personId}&klasseId=-1&${range}&withGrades=false`); }
+    catch (first) {
+      debug.examsFirstError = String(first.message || first);
+      ex = await rest(`/api/exams?${range}&klasseId=-1&withGrades=false`);
+    }
     out.exams = mapExams(ex);
-  } catch (e) { errors.push({ source: 'webuntis-pruefungen', message: String(e.message || e) }); }
+  } catch (e) {
+    // Fallback: Prüfungen per JSON-RPC (nicht an allen Schulen freigegeben)
+    try {
+      const list = await rpc('getExams', { startDate: untisDate(now0()), endDate: untisDate(addDays(now0(), 90)), examTypeId: 0 });
+      out.exams = mapExams({ data: { exams: (list || []).map(x => ({ id: x.id, examDate: x.date, subject: x.subject, name: x.name || '', examType: x.name || '', text: x.text || '' })) } });
+    } catch (e2) {
+      errors.push({ source: 'webuntis-pruefungen', message: String(e.message || e) });
+    }
+  }
 
   try { await rpc('logout', {}); } catch { /* egal */ }
-  return { ...out, errors };
+  return { ...out, errors, debug };
 }
 
 /* Findet den Login-Namen der Schule über die öffentliche WebUntis-Schulsuche,
@@ -220,11 +254,48 @@ export function mapExams(data) {
   return list.map(e => ({
     id: 'untis-exam:' + e.id,
     subject: e.subject || '',
-    type: /klassenarbeit|klausur|schulaufgabe/i.test(e.examType || e.name || '') ? 'Klassenarbeit' : 'Test',
+    type: /klassenarbeit|klausur|schulaufgabe|\bKA\b/i.test(e.examType || e.name || '') ? 'Klassenarbeit' : 'Test',
     title: e.name || e.examType || 'Prüfung',
     date: fromUntisDate(e.examDate),
     text: e.text || ''
   })).filter(e => e.date);
+}
+
+/* Neuere WebUntis-REST-Antwort (timetable/entries) in dasselbe Format wie mapTimetable bringen. */
+export function mapRestTimetable(data) {
+  const days = (data && data.days) || [];
+  const out = [];
+  for (const day of days) {
+    for (const g of day.gridEntries || []) {
+      const fields = [];
+      for (const k of Object.keys(g)) {
+        if (/^position\d+$/.test(k) && Array.isArray(g[k])) g[k].forEach(p => p && p.current && fields.push(p.current));
+      }
+      const subj = fields.find(f => f.type === 'SUBJECT') || {};
+      const room = fields.find(f => f.type === 'ROOM') || {};
+      const st = String(g.status || '').toUpperCase();
+      const start = String((g.duration && g.duration.start) || '');
+      const end = String((g.duration && g.duration.end) || '');
+      out.push({
+        date: start.slice(0, 10) || day.date,
+        start: start.slice(11, 16),
+        end: end.slice(11, 16),
+        subject: subj.longName || subj.displayName || subj.shortName || g.lessonText || 'Unterricht',
+        short: subj.shortName || '',
+        room: room.shortName || room.displayName || '',
+        status: st === 'CANCELLED' ? 'cancelled' : (st && st !== 'REGULAR' && st !== 'NORMAL') ? 'changed' : 'normal',
+        info: [g.substitutionText, g.lessonInfo, g.notesAll].filter(Boolean).join(' · ')
+      });
+    }
+  }
+  return out.filter(l => l.date && l.start).sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+}
+
+function jwtClaim(token, claim) {
+  try {
+    const part = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(part + '='.repeat((4 - part.length % 4) % 4)))[claim];
+  } catch { return null; }
 }
 
 /* ---------- iCal ---------- */
