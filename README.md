@@ -2,7 +2,7 @@
 
 Eine kleine Lern-App für Klasse 7 als Web-App (PWA). Sie läuft im Safari des iPads und lässt sich auf den Homescreen legen. Ein Mac oder App Store ist nicht nötig.
 
-**Phase 1** (dieser Stand) funktioniert ganz ohne Schulsysteme. Alle Daten bleiben lokal auf dem Gerät.
+**Phase 1** funktioniert ganz ohne Schulsysteme, alle Daten bleiben lokal auf dem Gerät. Optional holt die **Schulanbindung** Stundenplan, Ausfälle, Hausaufgaben und Prüfungen aus WebUntis sowie Aufgaben aus itslearning. Einrichtung: [worker/README.md](worker/README.md).
 
 - **Heute:** Briefing mit Vorlese-Button, Stundenplan, Ranzen-Check, fällige Hausaufgaben, nahende Termine, Tages- und Wochenziel
 - **Aufgaben:** Hausaufgaben eintragen und abhaken

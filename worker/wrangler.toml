@@ -1,0 +1,6 @@
+name = "lernbegleiter-sync"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+[vars]
+ALLOWED_ORIGIN = "https://nb-gsn.github.io"

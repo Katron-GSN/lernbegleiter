@@ -76,8 +76,11 @@ function defaultState() {
       periods: 8,
       afterSchoolHour: 14,
       baseItems: ['Federmäppchen', 'iPad geladen', 'Trinkflasche'],
-      holidays: []
+      holidays: [],
+      syncUrl: '',
+      syncKey: ''
     },
+    sync: null,
     subjects,
     timetable: { 1: [], 2: [], 3: [], 4: [], 5: [] },
     homework: [],
@@ -122,8 +125,27 @@ function nextSchoolDay(s, includeSelf = false) {
   for (let i = 0; i < 60; i++) { if (isSchoolDay(d)) return d; d = addDays(d, 1); }
   return d;
 }
+/* Ordnet ein Fach aus WebUntis (Langname oder Kürzel) einem Fach der App zu. */
+function matchSubject(name, short) {
+  const n = String(name || '').toLowerCase().trim();
+  const k = String(short || '').toLowerCase().trim();
+  if (!n && !k) return null;
+  return S.subjects.find(s => s.short && k && s.short.toLowerCase() === k)
+    || S.subjects.find(s => s.name.toLowerCase() === n || (k && s.name.toLowerCase() === k))
+    || S.subjects.find(s => n && (s.name.toLowerCase().startsWith(n) || n.startsWith(s.name.toLowerCase())))
+    || S.subjects.find(s => k.length >= 1 && s.name.toLowerCase().startsWith(k))
+    || null;
+}
+function subjectFor(name, short) {
+  return matchSubject(name, short) || { id: 'x:' + (short || name), name: name || short || 'Unterricht', color: '#94a3b8', items: [] };
+}
+
 function lessonsOn(s) {
   const wd = parse(s).getDay();
+  const synced = S.sync && Array.isArray(S.sync.lessons) ? S.sync.lessons.filter(l => l.date === s) : [];
+  if (synced.length) {
+    return synced.map((l, i) => ({ nr: i + 1, time: l.start, subj: subjectFor(l.subject, l.short), status: l.status, info: l.info, room: l.room }));
+  }
   if (wd < 1 || wd > 5 || inHoliday(s)) return [];
   const row = S.timetable[wd] || [];
   const out = [];
@@ -276,7 +298,7 @@ function ranzenItems(date) {
   const seen = new Set();
   const push = (txt, meta) => { const k = txt.toLowerCase(); if (!seen.has(k)) { seen.add(k); items.push({ txt, meta }); } };
   const subs = [];
-  lessonsOn(date).forEach(l => { if (!subs.includes(l.subj)) subs.push(l.subj); });
+  lessonsOn(date).filter(l => l.status !== 'cancelled').forEach(l => { if (!subs.some(x => x.id === l.subj.id)) subs.push(l.subj); });
   subs.forEach(s => (s.items || []).forEach(i => push(i, s.name)));
   S.settings.baseItems.forEach(i => push(i, ''));
   return items;
@@ -291,10 +313,18 @@ function briefingText() {
   const hour = new Date().getHours();
   lines.push(hour < 11 ? `Moin ${name}!` : hour < 17 ? `Hey ${name}!` : `Na ${name}, Feierabend in Sicht?`);
   if (lessons.length) {
+    const running = lessons.filter(l => l.status !== 'cancelled');
     const names = [];
-    lessons.forEach(l => { if (!names.includes(l.subj.name)) names.push(l.subj.name); });
-    const first = lessons[0].nr, last = lessons[lessons.length - 1].nr;
-    lines.push(`${t.label === 'Heute' ? 'Heute' : t.label} hast du ${lessons.length} Stunden, von der ${first}. bis zur ${last}. Stunde: ${names.join(', ')}.`);
+    running.forEach(l => { if (!names.includes(l.subj.name)) names.push(l.subj.name); });
+    if (running.length && running[0].time) {
+      lines.push(`${t.label} hast du ${running.length} Stunden, los geht's um ${running[0].time} Uhr: ${names.join(', ')}.`);
+    } else if (running.length) {
+      lines.push(`${t.label} hast du ${running.length} Stunden, von der ${running[0].nr}. bis zur ${running[running.length - 1].nr}. Stunde: ${names.join(', ')}.`);
+    }
+    const cancelled = lessons.filter(l => l.status === 'cancelled');
+    if (cancelled.length) lines.push(`Fällt aus: ${cancelled.map(l => (l.time ? l.time + ' Uhr ' : l.nr + '. Stunde ') + l.subj.name).join(', ')}.`);
+    const changed = lessons.filter(l => l.status === 'changed');
+    if (changed.length) lines.push(`Geändert: ${changed.map(l => l.subj.name + (l.info ? ' (' + l.info + ')' : '')).join(', ')}.`);
   } else {
     lines.push(`${t.label} ist noch kein Stundenplan eingetragen. Das kannst du unter „Plan“ machen.`);
   }
@@ -390,7 +420,10 @@ function viewToday() {
           <span class="tag">${fmtDate(t.date)}</span>
         </div>
         ${lessons.length ? `<div class="lessons">${lessons.map(l => `
-          <div class="lesson"><span class="nr">${l.nr}</span><span class="subj">${subjectDot(l.subj)}${esc(l.subj.name)}</span></div>`).join('')}</div>`
+          <div class="lesson ${l.status || ''}"><span class="nr">${l.time ? esc(l.time) : l.nr}</span><span class="subj">${subjectDot(l.subj)}<span class="nm">${esc(l.subj.name)}</span>
+            ${l.status === 'cancelled' ? '<span class="flag bad">fällt aus</span>' : l.status === 'changed' ? '<span class="flag warn">geändert</span>' : ''}
+            ${l.room ? `<span class="muted small">${esc(l.room)}</span>` : ''}</span>
+            ${l.info ? `<span class="info">${esc(l.info)}</span>` : ''}</div>`).join('')}</div>`
         : `<p class="empty">Noch kein Stundenplan für diesen Tag. <button class="btn small" data-go="plan">Plan eintragen</button></p>`}
       </section>
 
@@ -454,7 +487,7 @@ function hwRow(h) {
     <button class="box" data-action="hw-toggle" data-id="${esc(h.id)}" aria-label="${done ? 'Als offen markieren' : 'Erledigt'}">${done ? '✓' : ''}</button>
     <div>
       <div class="text">${esc(h.text)}</div>
-      <div class="sub">${subjectDot(s)}${esc(s ? s.name : 'Sonstiges')} · <span class="${done ? '' : dueClass(h.due)}">fällig ${esc(relDay(h.due))} (${fmtDate(h.due)})</span></div>
+      <div class="sub">${subjectDot(s)}${esc(s ? s.name : 'Sonstiges')}${h.source ? ` · <span class="src">${h.source === 'webuntis' ? 'WebUntis' : 'itslearning'}</span>` : ''} · <span class="${done ? '' : dueClass(h.due)}">fällig ${esc(relDay(h.due))} (${fmtDate(h.due)})</span></div>
     </div>
     <button class="icon-btn" data-action="hw-edit" data-id="${esc(h.id)}" aria-label="Bearbeiten">✎</button>
   </div>`;
@@ -639,7 +672,7 @@ function viewPlan() {
   const days = [1, 2, 3, 4, 5];
   return `
   <div class="stack">
-    <div class="hello"><div><h1>Stundenplan</h1><p class="muted">Einmal eintragen, dann weiß die App jeden Tag, was in den Ranzen muss.</p></div></div>
+    <div class="hello"><div><h1>Stundenplan</h1><p class="muted">${S.sync && S.sync.lessons && S.sync.lessons.length ? 'Der Stundenplan kommt automatisch aus WebUntis. Dieser Plan gilt nur, wenn keine Schuldaten da sind.' : 'Einmal eintragen, dann weiß die App jeden Tag, was in den Ranzen muss.'}</p></div></div>
     <section class="card">
       <div class="card-head">
         <h2>Woche</h2>
@@ -682,6 +715,7 @@ function openSubjectDialog(id) {
     <form method="dialog">
       <h2>${s ? 'Fach bearbeiten' : 'Neues Fach'}</h2>
       <label class="field">Name <input name="name" required value="${esc(s ? s.name : '')}" placeholder="z. B. Französisch"></label>
+      <label class="field">Kürzel in WebUntis (optional) <input name="short" autocapitalize="off" value="${esc(s ? s.short || '' : '')}" placeholder="z. B. F oder M"></label>
       <div class="field">Farbe
         <div class="swatches">${COLORS.map(c => `<button type="button" data-color="${c}" class="${c === color ? 'on' : ''}" style="background:${c}" aria-label="Farbe ${c}"></button>`).join('')}</div>
       </div>
@@ -697,6 +731,7 @@ function openSubjectDialog(id) {
     const d = new FormData(form);
     const rec = {
       name: String(d.get('name')).trim(),
+      short: String(d.get('short') || '').trim(),
       color,
       items: String(d.get('items') || '').split('\n').map(x => x.trim()).filter(Boolean)
     };
@@ -860,6 +895,14 @@ function viewMe() {
         <div class="subject-row"><span>🌴</span><div><b>${esc(h.label || 'Ferien')}</b><div class="items">${fmtDate(h.from)} bis ${fmtDate(h.to)}</div></div>
         <button class="icon-btn" data-action="holiday-delete" data-id="${esc(h.id)}" aria-label="Löschen">✕</button></div>`).join('')}</div>`
         : `<p class="empty">Keine Ferien eingetragen. In den Ferien pausiert die Serie.</p>`}
+      <div class="card-head"><h3>🔌 Schulanbindung (WebUntis, itslearning)</h3></div>
+      <p class="muted small">Holt Stundenplan, Ausfälle, Hausaufgaben und Prüfungen automatisch. Die Adresse und den App-Schlüssel bekommst du beim Einrichten des Abrufdienstes.</p>
+      <label class="field">Adresse des Abrufdienstes <input data-action="set-sync-url" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://lernbegleiter-sync.….workers.dev" value="${esc(S.settings.syncUrl)}"></label>
+      <label class="field">App-Schlüssel <input data-action="set-sync-key" type="password" autocomplete="off" value="${esc(S.settings.syncKey)}"></label>
+      <div class="row">
+        <button class="btn" data-action="sync" ${S.settings.syncUrl && S.settings.syncKey ? '' : 'disabled'}>${syncing ? '⏳ Lädt …' : '🔄 Jetzt abrufen'}</button>
+        <span class="muted small">${syncStatusText()}</span>
+      </div>
       <div class="card-head"><h3>Datensicherung</h3></div>
       <p class="muted small">Alle Daten liegen nur auf diesem Gerät. Sichere sie ab und zu, z. B. in der Dateien-App.</p>
       <div class="row">
@@ -914,6 +957,66 @@ function importData(file) {
   reader.readAsText(file);
 }
 function confirmInline(msg) { return window.confirm(msg); }
+
+/* ---------- Schulanbindung ---------- */
+
+let syncing = false;
+const SYNC_EVERY_MS = 30 * 60 * 1000;
+
+function syncStatusText() {
+  if (!S.settings.syncUrl || !S.settings.syncKey) return 'Noch nicht eingerichtet';
+  if (!S.sync || !S.sync.fetchedAt) return 'Noch nie abgerufen';
+  const d = new Date(S.sync.fetchedAt);
+  const errs = (S.sync.errors || []).map(e => e.source).join(', ');
+  return `Stand: ${fmtDate(iso(d), false)}, ${pad(d.getHours())}:${pad(d.getMinutes())} Uhr${errs ? ' · Probleme: ' + errs : ''}`;
+}
+
+function applySync(data) {
+  const today = todayISO();
+  S.sync = { updated: data.updated, fetchedAt: Date.now(), lessons: data.lessons || [], errors: data.errors || [] };
+  const longOf = k => ((data.lessons || []).find(l => l.short && l.short === k) || {}).subject || k;
+  const incoming = [
+    ...(data.homework || []).map(h => ({ id: h.id, subjectId: matchSubject(longOf(h.subject), h.subject)?.id || '', text: h.text, due: h.due, source: 'webuntis' })),
+    ...(data.assignments || []).map(a => ({ id: a.id, subjectId: matchSubject(a.course, '')?.id || '', text: a.title, due: a.due, source: 'itslearning' }))
+  ].filter(h => h.text && h.due);
+  const ids = new Set(incoming.map(h => h.id));
+  let added = 0;
+  incoming.forEach(h => {
+    const ex = S.homework.find(x => x.id === h.id);
+    if (ex) { ex.text = h.text; ex.due = h.due; if (!ex.subjectId) ex.subjectId = h.subjectId; }
+    else { S.homework.push({ ...h, created: today, self: false, doneAt: null }); added++; }
+  });
+  // Importierte Einträge, die die Schule entfernt hat und die schon vorbei sind, nicht als „überfällig“ stehen lassen.
+  S.homework = S.homework.filter(h => !h.source || h.doneAt || ids.has(h.id) || h.due >= today);
+  (data.exams || []).forEach(e => {
+    const rec = { type: e.type, subjectId: matchSubject(longOf(e.subject), e.subject)?.id || '', date: e.date, topic: e.text || e.title, source: 'webuntis' };
+    const ex = S.events.find(x => x.id === e.id);
+    if (ex) Object.assign(ex, rec); else S.events.push({ id: e.id, ...rec });
+  });
+  return added;
+}
+
+async function syncNow(force = false, quiet = false) {
+  const base = (S.settings.syncUrl || '').trim().replace(/\/+$/, '');
+  if (!base || !S.settings.syncKey || syncing) return;
+  syncing = true; render();
+  try {
+    const res = await fetch(base + '/sync' + (force ? '?fresh=1' : ''), { headers: { 'X-App-Key': S.settings.syncKey }, cache: 'no-store' });
+    if (res.status === 401) throw new Error('App-Schlüssel stimmt nicht');
+    if (!res.ok) throw new Error('Abrufdienst antwortet nicht (' + res.status + ')');
+    const added = applySync(await res.json());
+    save();
+    if (!quiet || added) toast(`Schuldaten aktualisiert${added ? ` · ${added} neue Aufgabe${added === 1 ? '' : 'n'}` : ''}`);
+  } catch (e) {
+    if (!quiet) toast(e.message && !/fetch/i.test(e.message) ? e.message : 'Kein Netz oder Abrufdienst nicht erreichbar');
+  } finally {
+    syncing = false; render();
+  }
+}
+function autoSync() {
+  if (!S.settings.syncUrl || !S.settings.syncKey || !navigator.onLine) return;
+  if (!S.sync || !S.sync.fetchedAt || Date.now() - S.sync.fetchedAt > SYNC_EVERY_MS) syncNow(false, true);
+}
 
 /* ---------- Dialog ---------- */
 
@@ -1012,6 +1115,7 @@ document.addEventListener('click', ev => {
       save(); render();
       break;
     case 'export': exportData(); break;
+    case 'sync': syncNow(true); break;
   }
 });
 
@@ -1030,6 +1134,10 @@ document.addEventListener('change', ev => {
     S.settings.name = el.value.trim() || 'du'; save(); render();
   } else if (action === 'set-hour') {
     S.settings.afterSchoolHour = Number(el.value); save(); render();
+  } else if (action === 'set-sync-url') {
+    S.settings.syncUrl = el.value.trim(); save(); render();
+  } else if (action === 'set-sync-key') {
+    S.settings.syncKey = el.value.trim(); save(); render(); autoSync();
   } else if (action === 'import' && el.files && el.files[0]) {
     importData(el.files[0]); el.value = '';
   }
@@ -1038,11 +1146,12 @@ document.addEventListener('change', ev => {
 window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (VIEWS[v] && v !== current) { current = v; render(); } });
 
 // Beim Zurückkehren in die App (z. B. am nächsten Morgen) neu zeichnen.
-document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); autoSync(); } });
 
 if ('speechSynthesis' in window) window.speechSynthesis.onvoiceschanged = () => {};
 
 render();
+autoSync();
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

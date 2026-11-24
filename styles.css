@@ -86,7 +86,7 @@ main { max-width: 860px; margin: 0 auto; padding: 16px; outline: none; }
 
 /* Timetable today */
 .lessons { display: grid; gap: 6px; }
-.lesson { display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--panel-2); }
+.lesson { display: grid; grid-template-columns: minmax(34px, auto) 1fr; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--panel-2); }
 .lesson .nr { color: var(--muted); font-variant-numeric: tabular-nums; text-align: center; font-weight: 600; }
 .lesson .subj { display: flex; align-items: center; gap: 8px; font-weight: 600; }
 .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
@@ -213,3 +213,12 @@ dialog form { display: grid; gap: 14px; }
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast.level { border-color: var(--accent-2); }
+
+/* Schulanbindung */
+.lesson .info { grid-column: 2; font-size: .85rem; color: var(--warn); }
+.lesson.cancelled .nm { text-decoration: line-through; color: var(--muted); }
+.lesson.cancelled { opacity: .75; }
+.flag { font-size: .75rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; }
+.flag.bad { color: var(--bad); }
+.flag.warn { color: var(--warn); }
+.src { font-size: .75rem; padding: 0 6px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); }
