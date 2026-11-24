@@ -11,7 +11,7 @@
  * Geheime Werte (bei Cloudflare als Secret, auf eigenem Server als Umgebungsvariable; nie ins Repo):
  *   APP_KEY         beliebiges langes Passwort, das auch in der App eingetragen wird
  *   UNTIS_SERVER    z. B. "nessa.webuntis.com" (steht in der Adresszeile von WebUntis)
- *   UNTIS_SCHOOL    Schulname, wie beim WebUntis-Login (z. B. "gym-musterstadt")
+ *   UNTIS_SCHOOL    optional: Schulname wie beim WebUntis-Login; leer = wird automatisch gesucht
  *   UNTIS_USER      Pauls WebUntis-Benutzername
  *   UNTIS_PASSWORD  Pauls WebUntis-Passwort
  *   ITSL_ICAL_URL   Pauls itslearning-iCal-Link (webcal:// oder https://)
@@ -94,8 +94,9 @@ export async function collect(env, fetchFn = fetch, now = new Date()) {
 /* ---------- WebUntis (inoffizielle Schnittstelle, Schülerzugang) ---------- */
 
 async function untis(env, fetchFn, from, to) {
-  const base = `https://${env.UNTIS_SERVER}/WebUntis`;
-  const school = env.UNTIS_SCHOOL;
+  const server = String(env.UNTIS_SERVER).replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const base = `https://${server}/WebUntis`;
+  const school = env.UNTIS_SCHOOL || await findSchoolLoginName(server, fetchFn);
   const schoolCookie = `schoolname="_${btoa(unescape(encodeURIComponent(school)))}"`;
   let session = '';
 
@@ -159,6 +160,24 @@ async function untis(env, fetchFn, from, to) {
 
   try { await rpc('logout', {}); } catch { /* egal */ }
   return { ...out, errors };
+}
+
+/* Findet den Login-Namen der Schule über die öffentliche WebUntis-Schulsuche,
+ * falls UNTIS_SCHOOL nicht gesetzt ist (z. B. bei Adressen wie schulname.webuntis.com). */
+export async function findSchoolLoginName(server, fetchFn = fetch) {
+  const sub = server.split('.')[0];
+  const res = await fetchFn('https://mobile.webuntis.com/ms/schoolquery2', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: 'lb', method: 'searchSchool', params: [{ search: sub }], jsonrpc: '2.0' })
+  });
+  const data = await res.json().catch(() => ({}));
+  const schools = (data.result && data.result.schools) || [];
+  const hit = schools.find(s => String(s.server || '').toLowerCase() === server.toLowerCase())
+    || schools.find(s => String(s.loginName || '').toLowerCase() === sub.toLowerCase())
+    || (schools.length === 1 ? schools[0] : null);
+  if (!hit || !hit.loginName) throw new Error('Schule nicht gefunden. Bitte UNTIS_SCHOOL eintragen.');
+  return hit.loginName;
 }
 
 export function mapTimetable(items) {

@@ -29,7 +29,7 @@ Beim Worker unter **Einstellungen → Variablen und Geheimnisse** diese Einträg
 | `ALLOWED_ORIGIN` | `https://nb-gsn.github.io` (Typ Text, nur ohne GitHub-Verbindung) |
 | `APP_KEY` | Ein langes, frei ausgedachtes Passwort. Dasselbe kommt später in die App. |
 | `UNTIS_SERVER` | Der Servername aus der WebUntis-Adresszeile, z. B. `nessa.webuntis.com` |
-| `UNTIS_SCHOOL` | Der Schulname wie beim WebUntis-Login (steht in der Adresse hinter `school=`) |
+| `UNTIS_SCHOOL` | Optional. Leer lassen, dann sucht der Dienst die Schule selbst. Nur nötig, wenn die App „Schule nicht gefunden“ meldet. |
 | `UNTIS_USER` | Pauls WebUntis-Benutzername |
 | `UNTIS_PASSWORD` | Pauls WebUntis-Passwort |
 | `ITSL_ICAL_URL` | Pauls iCal-Link aus itslearning (Kalender → iCal-Feed abrufen) |
