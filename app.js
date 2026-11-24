@@ -667,15 +667,38 @@ function openEventDialog(id) {
 
 /* ---------- Ansicht: Plan ---------- */
 
+function syncedWeek() {
+  const days = [];
+  let d = targetDay().date;
+  for (let i = 0; i < 20 && days.length < 5; i++) {
+    if (S.sync.lessons.some(l => l.date === d)) days.push(d);
+    d = addDays(d, 1);
+  }
+  if (!days.length) return '';
+  return `<section class="card">
+    <div class="card-head"><h2>Die nächsten Schultage</h2><span class="tag">aus WebUntis · ${esc(syncStatusText().replace(/ · Probleme.*$/, ''))}</span></div>
+    <div class="week-plan">${days.map(day => `
+      <div class="wp-day">
+        <h3>${fmtDate(day)}</h3>
+        <div class="lessons">${lessonsOn(day).map(l => `
+          <div class="lesson ${l.status || ''}"><span class="nr">${esc(l.time || String(l.nr))}</span><span class="subj">${subjectDot(l.subj)}<span class="nm">${esc(l.subj.name)}</span>
+            ${l.status === 'cancelled' ? '<span class="flag bad">fällt aus</span>' : l.status === 'changed' ? '<span class="flag warn">geändert</span>' : ''}</span>
+            ${l.info ? `<span class="info">${esc(l.info)}</span>` : ''}</div>`).join('')}</div>
+      </div>`).join('')}</div>
+  </section>`;
+}
+
 function viewPlan() {
+  const synced = !!(S.sync && S.sync.lessons && S.sync.lessons.length);
   const periods = S.settings.periods;
   const days = [1, 2, 3, 4, 5];
   return `
   <div class="stack">
-    <div class="hello"><div><h1>Stundenplan</h1><p class="muted">${S.sync && S.sync.lessons && S.sync.lessons.length ? 'Der Stundenplan kommt automatisch aus WebUntis. Dieser Plan gilt nur, wenn keine Schuldaten da sind.' : 'Einmal eintragen, dann weiß die App jeden Tag, was in den Ranzen muss.'}</p></div></div>
+    <div class="hello"><div><h1>Stundenplan</h1><p class="muted">${synced ? 'Kommt automatisch aus WebUntis, mit Ausfällen und Vertretungen.' : 'Einmal eintragen, dann weiß die App jeden Tag, was in den Ranzen muss.'}</p></div></div>
+    ${synced ? syncedWeek() : ''}
     <section class="card">
       <div class="card-head">
-        <h2>Woche</h2>
+        <h2>${synced ? 'Eigener Plan (nur Ersatz, wenn keine Schuldaten da sind)' : 'Woche'}</h2>
         <label class="row small muted">Stunden
           <select data-action="periods" class="btn small">${[5, 6, 7, 8, 9, 10].map(n => `<option ${n === periods ? 'selected' : ''}>${n}</option>`).join('')}</select>
         </label>

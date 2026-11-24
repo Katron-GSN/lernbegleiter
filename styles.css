@@ -222,3 +222,8 @@ dialog form { display: grid; gap: 14px; }
 .flag.bad { color: var(--bad); }
 .flag.warn { color: var(--warn); }
 .src { font-size: .75rem; padding: 0 6px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); }
+
+.week-plan { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.wp-day { display: grid; gap: 6px; align-content: start; }
+.wp-day h3 { font-size: .9rem; color: var(--muted); }
+.wp-day .lesson { padding: 6px 8px; font-size: .9rem; }

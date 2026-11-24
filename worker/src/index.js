@@ -188,7 +188,9 @@ async function untis(env, fetchFn, from, to) {
       const list = await rpc('getExams', { startDate: untisDate(now0()), endDate: untisDate(addDays(now0(), 90)), examTypeId: 0 });
       out.exams = mapExams({ data: { exams: (list || []).map(x => ({ id: x.id, examDate: x.date, subject: x.subject, name: x.name || '', examType: x.name || '', text: x.text || '' })) } });
     } catch (e2) {
-      errors.push({ source: 'webuntis-pruefungen', message: String(e.message || e) });
+      // 403 = Schule gibt Prüfungstermine für Schülerkonten nicht frei. Kein Fehler, Termine trägt Paul selbst ein.
+      if (/403/.test(String(e.message))) debug.examsBlocked = true;
+      else errors.push({ source: 'webuntis-pruefungen', message: String(e.message || e) });
     }
   }
 
