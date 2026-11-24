@@ -6,23 +6,27 @@ Die Einrichtung geht komplett im Browser, ohne Programme auf dem PC. Sie dauert 
 
 ## 1. Cloudflare-Konto
 
-1. Auf [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) ein kostenloses Konto anlegen.
-2. Links **Workers & Pages** öffnen → **Erstellen** → **Worker erstellen**.
-3. Als Namen `lernbegleiter-sync` eingeben → **Bereitstellen**.
+Auf [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) ein kostenloses Konto anlegen.
 
-## 2. Code einfügen
+## 2. Worker aus GitHub anlegen (empfohlen)
 
-1. Beim neuen Worker auf **Code bearbeiten** klicken.
-2. Den gesamten Inhalt der Datei [`src/index.js`](src/index.js) aus diesem Repo kopieren und den Beispielcode damit ersetzen.
-3. Oben rechts **Bereitstellen** klicken.
+So holt sich Cloudflare jede neue Version aus dem Repo automatisch.
+
+1. **Workers & Pages** → **Erstellen** → **Repository importieren** (bzw. „Import a repository“).
+2. GitHub verbinden und Zugriff auf `NB-GSN/lernbegleiter` erlauben.
+3. Das Repository `lernbegleiter` auswählen.
+4. Einstellungen: Projektname `lernbegleiter-sync`, **Root-Verzeichnis `worker`**, Build-Befehl leer, Deploy-Befehl `npx wrangler deploy`.
+5. **Bereitstellen**. Die Adresse steht danach oben beim Worker. Test: `<Adresse>/health` im Browser zeigt `{"ok":true,…}`.
+
+**Ohne GitHub-Verbindung:** **Mit Hello World beginnen** → Namen `lernbegleiter-sync` → Bereitstellen → **Code bearbeiten** → den Inhalt von [`src/index.js`](src/index.js) einfügen → Bereitstellen. Dann zusätzlich `ALLOWED_ORIGIN` als Text-Variable eintragen (siehe unten). Updates müssen bei dieser Variante von Hand eingefügt werden.
 
 ## 3. Werte eintragen
 
-Beim Worker unter **Einstellungen → Variablen und Geheimnisse** diese Einträge hinzufügen. Alle außer `ALLOWED_ORIGIN` als Typ **Geheimnis** anlegen.
+Beim Worker unter **Einstellungen → Variablen und Geheimnisse** diese Einträge hinzufügen. Alle als Typ **Geheimnis** anlegen. `ALLOWED_ORIGIN` kommt bei der GitHub-Variante schon aus `wrangler.toml` und muss nur bei der Variante ohne GitHub eingetragen werden.
 
 | Name | Was hinein gehört |
 | --- | --- |
-| `ALLOWED_ORIGIN` | `https://nb-gsn.github.io` (Typ Text) |
+| `ALLOWED_ORIGIN` | `https://nb-gsn.github.io` (Typ Text, nur ohne GitHub-Verbindung) |
 | `APP_KEY` | Ein langes, frei ausgedachtes Passwort. Dasselbe kommt später in die App. |
 | `UNTIS_SERVER` | Der Servername aus der WebUntis-Adresszeile, z. B. `nessa.webuntis.com` |
 | `UNTIS_SCHOOL` | Der Schulname wie beim WebUntis-Login (steht in der Adresse hinter `school=`) |
