@@ -32,6 +32,6 @@ Die Serie zählt Schultage mit Aktivität. Wochenenden und eingetragene Ferien u
 
 ## Technik
 
-Reines HTML, CSS und JavaScript ohne Build-Schritt, veröffentlicht über GitHub Pages. `sw.js` macht die App offline nutzbar; nach Änderungen dort `VERSION` erhöhen.
+Reines HTML, CSS und JavaScript ohne Build-Schritt mit relativen Pfaden, veröffentlicht über GitHub Pages. Der Abrufdienst in `worker/` läuft bei Cloudflare oder auf einem eigenen Node.js-Server; ein späterer Umzug ist in [worker/README.md](worker/README.md#später-auf-einen-eigenen-server-umziehen) beschrieben. `sw.js` macht die App offline nutzbar; nach Änderungen dort `VERSION` erhöhen.
 
 Das Konzept steht im Projekt-Dokument „Lernbegleiter – Konzept“.

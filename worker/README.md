@@ -42,3 +42,15 @@ In der App unter **Ich → Schulanbindung** die Adresse des Dienstes und den `AP
 - **Login über Schulkonto:** Wenn sich Paul bei WebUntis nur über ein Microsoft- oder Schulkonto (Single Sign-on) anmelden kann, funktioniert die Anmeldung mit Benutzername und Passwort nicht. Dann zeigt die App unter „Schulanbindung“ ein Problem bei `webuntis` an.
 - **Teilweise Daten:** Klappt nur ein Teil (z. B. Stundenplan ja, Hausaufgaben nein), zeigt die App die Daten, die da sind, und nennt die Quelle mit Problem.
 - Ein Abruf wird 10 Minuten zwischengespeichert. **Jetzt abrufen** in der App holt immer frisch.
+
+## Später auf einen eigenen Server umziehen
+
+Der Dienst ist nicht an Cloudflare gebunden. Derselbe Code `src/index.js` läuft auch mit Node.js 18 oder neuer, z. B. auf einem Raspberry Pi, einem NAS oder einem gemieteten Server.
+
+1. Den Ordner `worker` auf den Server kopieren.
+2. `.env.example` als `.env` kopieren und dieselben Werte eintragen wie bei Cloudflare.
+3. Starten mit `node server.js`, oder per Docker: `docker build -t lernbegleiter-sync .` und `docker run --env-file .env -p 8787:8787 lernbegleiter-sync`.
+4. Den Server über HTTPS erreichbar machen (z. B. mit einem Reverse Proxy wie Caddy), weil die App nur HTTPS-Adressen abrufen darf.
+5. In der App unter **Ich → Schulanbindung** nur die Adresse ändern. Daten in der App bleiben erhalten.
+
+Die App selbst ist eine reine statische Webseite mit relativen Pfaden. Sie kann von GitHub Pages auf jeden anderen Webserver umziehen, indem man die Dateien im Hauptordner dorthin kopiert. Dann in `ALLOWED_ORIGIN` die neue Adresse der App eintragen (mehrere durch Komma getrennt). Achtung: Die Daten in der App hängen an der Web-Adresse. Vor einem Adresswechsel unter **Ich → Datensicherung** sichern und auf der neuen Adresse wiederherstellen.

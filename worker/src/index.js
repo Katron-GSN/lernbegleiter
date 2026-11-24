@@ -1,9 +1,14 @@
-/* Lernbegleiter-Abrufdienst (Cloudflare Worker)
+/* Lernbegleiter-Abrufdienst
  *
  * Holt Stundenplan, Vertretungen, Hausaufgaben und Prüfungen aus WebUntis
  * und Aufgaben aus dem itslearning-iCal-Feed. Die App ruft nur GET /sync auf.
  *
- * Geheime Werte (mit `npx wrangler secret put NAME` setzen, nie ins Repo):
+ * Läuft unverändert auf zwei Wegen:
+ *   - Cloudflare Workers: der `export default` unten (Cache über caches.default)
+ *   - eigener Server mit Node.js 18+: `node server.js` (nutzt `handle` mit einem Speicher-Cache)
+ * Die Logik selbst nutzt nur Web-Standards (fetch, Request, Response, Intl, btoa).
+ *
+ * Geheime Werte (bei Cloudflare als Secret, auf eigenem Server als Umgebungsvariable; nie ins Repo):
  *   APP_KEY         beliebiges langes Passwort, das auch in der App eingetragen wird
  *   UNTIS_SERVER    z. B. "nessa.webuntis.com" (steht in der Adresszeile von WebUntis)
  *   UNTIS_SCHOOL    Schulname, wie beim WebUntis-Login (z. B. "gym-musterstadt")
@@ -15,34 +20,44 @@
 
 const DAYS_BACK = 1;
 const DAYS_AHEAD = 14;
-const CACHE_SECONDS = 600;
+export const CACHE_SECONDS = 600;
 
+/* Plattformunabhängiger Kern.
+ * cache = { get(): Promise<object|null>, put(data): Promise<void> } – vom jeweiligen Host bereitgestellt. */
+export async function handle(request, env, cache = null, fetchFn = fetch) {
+  const cors = corsHeaders(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+
+  const url = new URL(request.url);
+  if (url.pathname === '/' || url.pathname === '/health') {
+    return json({ ok: true, service: 'lernbegleiter-sync' }, 200, cors);
+  }
+  if (url.pathname !== '/sync') return json({ error: 'not_found' }, 404, cors);
+
+  const key = request.headers.get('X-App-Key') || '';
+  if (!env.APP_KEY || !timingSafeEqual(key, env.APP_KEY)) return json({ error: 'unauthorized' }, 401, cors);
+
+  const fresh = url.searchParams.get('fresh') === '1';
+  if (cache && !fresh) {
+    const hit = await cache.get();
+    if (hit) return json(hit, 200, cors);
+  }
+  const result = await collect(env, fetchFn);
+  if (cache) await cache.put(result);
+  return json(result, 200, cors);
+}
+
+/* Cloudflare-Workers-Einstieg */
 export default {
-  async fetch(request, env, ctx) {
-    const cors = corsHeaders(request, env);
-    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
-
-    const url = new URL(request.url);
-    if (url.pathname === '/' || url.pathname === '/health') {
-      return json({ ok: true, service: 'lernbegleiter-sync' }, 200, cors);
-    }
-    if (url.pathname !== '/sync') return json({ error: 'not_found' }, 404, cors);
-
-    const key = request.headers.get('X-App-Key') || '';
-    if (!env.APP_KEY || !timingSafeEqual(key, env.APP_KEY)) return json({ error: 'unauthorized' }, 401, cors);
-
-    const fresh = url.searchParams.get('fresh') === '1';
-    const cache = caches.default;
-    const cacheKey = new Request('https://cache.lernbegleiter/sync');
-    if (!fresh) {
-      const hit = await cache.match(cacheKey);
-      if (hit) return withHeaders(hit, cors);
-    }
-
-    const result = await collect(env);
-    const res = json(result, 200, { 'Cache-Control': `max-age=${CACHE_SECONDS}` });
-    ctx.waitUntil(cache.put(cacheKey, res.clone()));
-    return withHeaders(res, cors);
+  async fetch(request, env) {
+    const key = new Request('https://cache.lernbegleiter/sync');
+    const cache = {
+      async get() { const r = await caches.default.match(key); return r ? r.json() : null; },
+      async put(data) {
+        await caches.default.put(key, json(data, 200, { 'Cache-Control': `max-age=${CACHE_SECONDS}` }));
+      }
+    };
+    return handle(request, env, cache);
   }
 };
 
@@ -249,11 +264,6 @@ function corsHeaders(request, env) {
 }
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', ...headers } });
-}
-function withHeaders(res, headers) {
-  const r = new Response(res.body, res);
-  Object.entries(headers).forEach(([k, v]) => r.headers.set(k, v));
-  return r;
 }
 function timingSafeEqual(a, b) {
   if (a.length !== b.length) return false;
