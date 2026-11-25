@@ -160,7 +160,7 @@ function subjectFor(name, short) {
 function lessonsOn(s) {
   if (inHoliday(s)) return [];
   const synced = S.sync && Array.isArray(S.sync.lessons) ? S.sync.lessons.filter(l => l.date === s) : [];
-  return synced.map((l, i) => ({ nr: i + 1, time: l.start, subj: subjectFor(l.subject, l.short), status: l.status, info: l.info, room: l.room }));
+  return synced.map((l, i) => ({ nr: i + 1, time: l.start, end: l.end, subj: subjectFor(l.subject, l.short), status: l.status, info: l.info, room: l.room }));
 }
 const syncConfigured = () => !!(S.settings.syncUrl && S.settings.syncKey);
 
@@ -507,44 +507,94 @@ function nextChooser(a, t, rec) {
       <span class="pick-main">${o.tag}<b>${esc(o.text)}</b></span><span class="meta">${esc(o.meta)}</span></button>`).join('')}</div>` : ''}`;
 }
 
+/* Für welches Fach steht bald eine Arbeit oder ein Test an? */
+function testFor(subjectId, from, days = 7) {
+  if (!subjectId) return null;
+  return S.events.filter(e => e.subjectId === subjectId && ['Klassenarbeit', 'Test'].includes(e.type) && e.date >= from && diffDays(from, e.date) <= days)
+    .sort((a, b) => a.date.localeCompare(b.date))[0] || null;
+}
+const subjTag = s => s ? `<span class="subj-tag" style="--c:${esc(s.color)}">${esc(s.name)}</span>` : '';
+
+/* Ring: Tagesziel = Ranzen gepackt + alles bis zum nächsten Schultag erledigt. */
+function goalRing(rec) {
+  const horizon = nextSchoolDay(todayISO());
+  const hwOk = S.homework.filter(h => !h.doneAt && h.due <= horizon).length === 0;
+  const parts = (rec.ranzen ? 1 : 0) + (hwOk ? 1 : 0);
+  const done = rec.goal ? 2 : parts;
+  const c = 2 * Math.PI * 46;
+  return `<div class="ring" role="img" aria-label="Tagesziel ${done} von 2">
+    <svg viewBox="0 0 112 112" aria-hidden="true"><circle class="track" cx="56" cy="56" r="46"/>${done ? `<circle class="bar" cx="56" cy="56" r="46" stroke-dasharray="${(c * done / 2).toFixed(1)} ${c.toFixed(1)}"/>` : ''}</svg>
+    <div class="rl"><div>${done === 2 ? ICON.check.replace('width="16" height="16"', 'width="30" height="30"') : done + '/2'}<small>Tagesziel</small></div></div></div>`;
+}
+
 function nextCard(t, rec) {
   const a = nextAction(t, rec);
+  let label, title, meta, extra = '', buttons;
   if (a.kind === 'hw') {
     const s = subjectById(a.h.subjectId);
-    return `<section class="next-card ${a.label === 'Überfällig' ? 'late' : ''}">
-      <span class="label">${a.label}</span>
-      <h2>${s ? `<span class="subj-tag" style="--c:${esc(s.color)}">${esc(s.name)}</span>` : ''}${esc(a.h.text)}</h2>
-      <p class="meta">fällig ${esc(relDay(a.h.due))} · ${fmtDate(a.h.due)}${a.h.source ? ' · aus ' + (a.h.source === 'webuntis' ? 'WebUntis' : 'itslearning') : ''}</p>
-      <div class="row">
-        <button class="btn primary" data-action="hw-toggle" data-id="${esc(a.h.id)}">${ICON.check} Erledigt</button>
-      </div>
-      ${nextChooser(a, t, rec)}
-    </section>`;
-  }
-  if (a.kind === 'ranzen') {
-    return `<section class="next-card">
-      <span class="label">Als Nächstes</span>
-      <h2>Ranzen packen für ${esc(t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label)}</h2>
-      <p class="meta">Noch ${a.missing} Sache${a.missing === 1 ? '' : 'n'} · danach ist das Tagesziel geschafft</p>
-      <div class="row"><button class="btn primary" data-action="scroll-ranzen">Zum Ranzen-Check</button></div>
-      ${nextChooser(a, t, rec)}
-    </section>`;
-  }
-  if (a.kind === 'puzzle') {
+    const ev = testFor(a.h.subjectId, todayISO());
+    label = a.label;
+    title = subjTag(s) + esc(a.h.text);
+    meta = `fällig ${esc(relDay(a.h.due))}${a.h.source ? ' · aus ' + (a.h.source === 'webuntis' ? 'WebUntis' : 'itslearning') : ''}`;
+    if (ev) { const rd = relDay(ev.date); extra = `<div><span class="countdown ${diffDays(todayISO(), ev.date) <= 1 ? 'now' : 'soon'}">${esc(ev.type)} ${rd === 'heute' || rd === 'morgen' || rd === 'übermorgen' || rd.startsWith('in ') ? esc(rd) : 'am ' + esc(rd)}</span></div>`; }
+    buttons = `<button class="btn small primary" data-action="hw-toggle" data-id="${esc(a.h.id)}">${ICON.check} Erledigt</button>`;
+  } else if (a.kind === 'ranzen') {
+    label = 'Als Nächstes';
+    title = `Ranzen packen für ${esc(t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label)}`;
+    meta = `Noch ${a.missing} Sache${a.missing === 1 ? '' : 'n'}`;
+    buttons = `<button class="btn small primary" data-action="scroll-ranzen">Zum Ranzen-Check</button>`;
+  } else if (a.kind === 'puzzle') {
     const g = dailyGame();
-    return `<section class="next-card reward">
-      <span class="label">Tagesziel geschafft</span>
-      <div class="reward-row">${stickerSVG(g.id, 52)}<div><h2>Dein Tagesrätsel: ${esc(g.name)}</h2><p class="meta">Lösen und den Sticker fürs Album holen</p></div></div>
-      <div class="row"><button class="btn primary" data-action="daily-start">Rätsel starten</button></div>
-      ${nextChooser(a, t, rec)}
-    </section>`;
+    label = 'Tagesziel geschafft';
+    title = 'Tagesrätsel: ' + esc(g.name);
+    meta = 'Lösen und den Sticker fürs Album holen';
+    buttons = `<button class="btn small primary" data-action="daily-start">Rätsel starten</button>`;
+  } else {
+    label = 'Alles erledigt';
+    title = 'Nichts mehr offen. Feierabend.';
+    meta = dailySolved() ? 'Tagesrätsel gelöst, der Sticker ist im Album.' : 'Neue Aufgaben kommen automatisch aus WebUntis und itslearning.';
+    buttons = '';
   }
-  return `<section class="next-card calm">
-    <span class="label">Alles erledigt</span>
-    <h2>Nichts mehr offen. Feierabend.</h2>
-    <p class="meta">${dailySolved() ? 'Tagesrätsel gelöst, Sticker ist im Album.' : 'Neue Aufgaben kommen automatisch aus WebUntis und itslearning.'}</p>
+  const today = todayISO();
+  const horizon = nextSchoolDay(today);
+  const openSoon = S.homework.filter(h => !h.doneAt && h.due <= horizon).length;
+  const solved = dailySolved();
+  return `<section class="card next-card ${a.label === 'Überfällig' ? 'late' : ''}">
+    <div class="next">
+      ${a.kind === 'puzzle' ? `<div class="ring sticker-ring">${stickerSVG(dailyGame().id, 72)}</div>` : goalRing(rec)}
+      <div class="what">
+        <span class="eyebrow">${label}</span>
+        <div class="next-title">${title}</div>
+        <div class="muted small">${meta}</div>
+        ${extra}
+      </div>
+    </div>
+    <div class="actions">${buttons}${nextChooser(a, t, rec)}</div>
+    <div class="goalline" aria-label="Tagesziel">
+      <span class="${rec.ranzen ? 'ok' : ''}">${rec.ranzen ? ICON.check + ' Ranzen gepackt' : 'Ranzen offen'}</span>
+      <span class="${openSoon === 0 ? 'ok' : ''}">${openSoon === 0 ? ICON.check + ' Aufgaben erledigt' : openSoon + (openSoon === 1 ? ' Aufgabe offen' : ' Aufgaben offen')}</span>
+      <span class="${solved ? 'ok' : rec.goal ? 'ready' : ''}">${solved ? ICON.check + ' Rätsel gelöst' : rec.goal ? 'Tagesrätsel frei' : ICON.lock + ' Tagesrätsel'}</span>
+      <span class="${S.weeks[isoWeekKey(today)] ? 'ok' : ''}">Woche ${weekGoalCount()}/${WEEK_GOAL_DAYS}</span>
+    </div>
   </section>`;
 }
+
+/* Eine Unterrichtsstunde im Stil der Stundenkarten. */
+function lessonRow(l, date, compact = false) {
+  const first = !compact && lessonsOn(date).find(x => x.subj.id === l.subj.id && x.status !== 'cancelled') ;
+  const ev = first && first.nr === l.nr && l.status !== 'cancelled' && S.events.find(e => e.date === date && e.subjectId === l.subj.id && ['Klassenarbeit', 'Test'].includes(e.type));
+  const pill = l.status === 'cancelled' ? '<span class="pill p-bad">fällt aus</span>'
+    : ev ? `<span class="pill p-grad">${esc(ev.type)}</span>`
+    : l.status === 'changed' ? '<span class="pill p-warn">geändert</span>' : '';
+  const meta = [l.room, l.info].filter(Boolean).join(' · ');
+  return `<div class="lesson ${l.status === 'cancelled' ? 'cancelled' : ''}" style="--c:${esc(l.subj.color)}">
+    <div class="time">${esc(l.time || l.nr + '.')}${l.end && !compact ? `<small>${esc(l.end)}</small>` : ''}</div>
+    <div class="what"><div class="subj">${esc(l.subj.name)}</div>${meta ? `<div class="meta">${esc(meta)}</div>` : ''}</div>
+    ${pill}
+  </div>`;
+}
+
+const MOTTOS = ['Du packst das.', 'Heute wird gut.', 'Schritt für Schritt.', 'Auf geht\'s.', 'Läuft bei dir.', 'Bleib dran.', 'Du hast das im Griff.'];
 
 function viewToday() {
   const today = todayISO();
@@ -561,77 +611,72 @@ function viewToday() {
   const open = S.homework.filter(h => !h.doneAt).sort((a, b) => a.due.localeCompare(b.due));
   const shownHw = open.filter(h => diffDays(today, h.due) <= 7);
   const events = S.events.filter(e => e.date >= today && diffDays(today, e.date) <= 14).sort((a, b) => a.date.localeCompare(b.date));
-  const horizon = nextSchoolDay(today);
-  const openSoon = open.filter(h => h.due <= horizon).length;
+  const tests = S.events.filter(e => e.date >= today && diffDays(today, e.date) <= 7 && ['Klassenarbeit', 'Test'].includes(e.type)).length;
   const tLower = t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label;
+  const lv = levelInfo();
+  const st = streakInfo();
 
   const greet = now.getHours() < 11 ? 'Moin' : now.getHours() < 17 ? 'Hey' : 'Guten Abend';
+  const motto = rec.goal ? 'Stark gemacht.' : MOTTOS[(Math.floor(parse(today) / 864e5)) % MOTTOS.length];
+  const brief = briefingText().slice(2).filter(l => l !== 'Viel Erfolg!' && !l.startsWith('Deine Serie'));
 
   return `
   <div class="stack">
-    <div class="hello">
-      <div>
-        <span class="label">${WD_SHORT[now.getDay()]} ${now.getDate()}. ${MONTHS[now.getMonth()]}${inHoliday(today) ? ' · Ferien' : ''}</span>
-        <h1>${greet} ${esc(S.settings.name)}</h1>
+    <section class="hero">
+      <div class="card hello-card">
+        <div class="hello-top">
+          <span class="eyebrow">Heute · ${WEEKDAYS[now.getDay()]}, ${now.getDate()}. ${MONTHS_LONG[now.getMonth()]}${inHoliday(today) ? ' · Ferien' : ''}</span>
+          <button class="xp" data-go="me" aria-label="Zu deinem Profil"><span class="streak">🔥 ${st.count}</span><span>Lv ${lv.lvl} · ${S.xp.toLocaleString('de-DE')} XP</span></button>
+        </div>
+        <h1>${greet} ${esc(S.settings.name)}! <span class="gradtext">${esc(motto)}</span></h1>
+        <p class="quote">${esc(quoteOfDay())}</p>
+        <div class="brief-text">${brief.map(l => `<p>${esc(l)}</p>`).join('')}</div>
+        <div class="row tight">
+          <button class="btn small primary" data-action="speak">${speaking ? ICON.stop + ' Stopp' : ICON.play + ' Briefing anhören'}</button>
+          ${rec.briefing ? `<span class="pill p-good">${ICON.check} Briefing gelesen</span>` : `<button class="btn small ghost" data-action="briefing-done">Gelesen · +${XP.briefing} XP</button>`}
+        </div>
       </div>
-    </div>
-
-    <section class="quote-card">
-      <div class="quote-row">
-        <div class="mini-bot" aria-hidden="true">${robotSVG(S.equipped, 'q', true)}</div>
-        <div><span class="label">Spruch des Tages</span><p class="quote">${esc(quoteOfDay())}</p></div>
-      </div>
-      <div class="brief-text">${briefingText().slice(2).map(l => `<p>${esc(l)}</p>`).join('')}</div>
-      <div class="row briefing-row">
-        <button class="btn small" data-action="speak">${speaking ? ICON.stop + ' Stopp' : ICON.play + ' Briefing anhören'}</button>
-        ${rec.briefing ? `<span class="tag ok">Briefing ${ICON.check}</span>` : `<button class="btn small ghost" data-action="briefing-done">Gelesen · +${XP.briefing} XP</button>`}
-      </div>
+      ${nextCard(t, rec)}
     </section>
 
-    ${nextCard(t, rec)}
-
-    <section class="goal-strip" aria-label="Tagesziel">
-      <div class="seg-item ${rec.ranzen ? 'done' : ''}"><span class="label">Ranzen</span><b>${rec.ranzen ? 'gepackt' : 'offen'}</b></div>
-      <div class="seg-item ${openSoon === 0 ? 'done' : ''}"><span class="label">Aufgaben</span><b>${openSoon === 0 ? 'erledigt' : openSoon + ' offen'}</b></div>
-      <div class="seg-item ${dailySolved() ? 'done' : rec.goal ? 'ready' : 'locked'}"><span class="label">Rätsel</span><b>${dailySolved() ? 'gelöst' : rec.goal ? 'frei' : 'gesperrt'}</b></div>
-      <div class="seg-item ${S.weeks[isoWeekKey(today)] ? 'done' : ''}"><span class="label">Woche</span><b>${weekGoalCount()}/${WEEK_GOAL_DAYS}</b></div>
+    <section class="stats">
+      <button class="card stat c-accent" data-go="me"><span class="v">${lv.lvl}</span><span class="l">Level · noch ${(lv.to - S.xp).toLocaleString('de-DE')} XP</span></button>
+      <button class="card stat c-violet" data-go="me"><span class="v">${st.count}</span><span class="l">${st.count === 1 ? 'Tag' : 'Tage'} Serie</span></button>
+      <button class="card stat c-red" data-go="events"><span class="v">${tests}</span><span class="l">${tests === 1 ? 'Test' : 'Tests'} in 7 Tagen</span></button>
+      <button class="card stat c-green" data-go="homework"><span class="v">${open.length}</span><span class="l">${open.length === 1 ? 'Aufgabe' : 'Aufgaben'} offen</span></button>
     </section>
 
     <div class="grid-2">
       <section class="card">
-        <div class="card-head"><h2>${esc(t.label)}</h2><span class="tag">${fmtDate(t.date)}</span></div>
-        ${lessons.length ? `<div class="lessons">${lessons.map(l => `
-          <div class="lesson ${l.status || ''}"><span class="nr">${l.time ? esc(l.time) : l.nr}</span><span class="subj">${subjectDot(l.subj)}<span class="nm">${esc(l.subj.name)}</span>
-            ${l.status === 'cancelled' ? '<span class="flag bad">fällt aus</span>' : l.status === 'changed' ? '<span class="flag warn">geändert</span>' : ''}
-            ${l.room ? `<span class="muted small">${esc(l.room)}</span>` : ''}</span>
-            ${l.info ? `<span class="info">${esc(l.info)}</span>` : ''}</div>`).join('')}</div>`
+        <div class="card-head"><h2>Dein Tag ${esc(t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : 'am ' + t.label)}</h2><span class="tag">${fmtDate(t.date)}</span></div>
+        ${lessons.length ? `<div class="lessons">${lessons.map(l => lessonRow(l, t.date)).join('')}</div>`
         : inHoliday(t.date) ? `<p class="empty">Ferien.</p>`
         : syncConfigured() ? `<p class="empty">Für diesen Tag kommen noch keine Stunden aus WebUntis.</p>`
-        : `<p class="empty">Der Stundenplan kommt aus WebUntis. <button class="btn small" data-action="open-settings">Schulanbindung einrichten</button></p>`}
+        : `<p class="empty">Der Stundenplan kommt aus WebUntis.</p><div class="row"><button class="btn small" data-action="open-settings">Schulanbindung einrichten</button></div>`}
       </section>
 
       <section class="card" id="ranzen">
-        <div class="card-head"><h2>Ranzen für ${esc(tLower)}</h2><span class="tag ${rec.ranzen ? 'ok' : ''}">${rec.ranzen ? 'gepackt' : `+${XP.ranzen} XP`}</span></div>
+        <div class="card-head"><h2>🎒 Ranzen für ${esc(tLower)}</h2>${rec.ranzen ? `<span class="pill p-good">${ICON.check} gepackt</span>` : `<span class="tag">+${XP.ranzen} XP</span>`}</div>
         ${items.length ? `<ul class="check-list">${items.map(i => `
           <li><button class="check ${checked.has(i.txt) ? 'done' : ''}" data-action="pack" data-item="${esc(i.txt)}">
             <span class="box">${boxMark(checked.has(i.txt))}</span>
             <span class="label-txt">${esc(i.txt)}</span>
             ${i.meta ? `<span class="meta">${esc(i.meta)}</span>` : ''}
           </button></li>`).join('')}</ul>
-          ${allPacked ? '' : `<button class="btn small ghost" data-action="pack-all">Alles drin</button>`}`
+          ${allPacked ? '' : `<div class="row"><button class="btn small ghost" data-action="pack-all">Alles drin</button></div>`}`
         : `<p class="empty">Nichts zu packen.</p>`}
       </section>
     </div>
 
     <section class="card">
-      <div class="card-head"><h2>Hausaufgaben</h2><button class="btn small" data-action="hw-new">+ Neu</button></div>
+      <div class="card-head"><h2>Hausaufgaben</h2><button class="btn small ghost" data-action="hw-new">+ Neu</button></div>
       ${shownHw.length ? `<div class="list">${shownHw.map(hwRow).join('')}</div>`
         : `<p class="empty">${open.length ? 'Diese Woche ist nichts fällig.' : 'Keine offenen Hausaufgaben.'}</p>`}
-      ${open.length > shownHw.length ? `<button class="btn small ghost" data-go="homework">Alle ${open.length} offenen ansehen</button>` : ''}
+      ${open.length > shownHw.length ? `<div class="row"><button class="btn small ghost" data-go="homework">Alle ${open.length} offenen ansehen</button></div>` : ''}
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>Bald dran</h2><button class="btn small" data-action="ev-new">+ Termin</button></div>
+      <div class="card-head"><h2>Bald dran</h2><button class="btn small ghost" data-action="ev-new">+ Termin</button></div>
       ${events.length ? `<div class="list">${events.map(evRow).join('')}</div>`
         : `<p class="empty">In den nächsten zwei Wochen stehen keine Arbeiten oder Tests an.</p>`}
     </section>
@@ -641,13 +686,15 @@ function viewToday() {
 function hwRow(h) {
   const s = subjectById(h.subjectId);
   const done = !!h.doneAt;
+  const n = diffDays(todayISO(), h.due);
+  const pill = done ? '' : n < 0 ? '<span class="pill p-bad">überfällig</span>' : n === 0 ? '<span class="pill p-warn">heute</span>' : n === 1 ? '<span class="pill p-warn">morgen</span>' : n <= 6 ? `<span class="pill p-blue">${WD_SHORT[parse(h.due).getDay()]}</span>` : '';
   return `<div class="hw ${done ? 'done' : ''}">
     <button class="box" data-action="hw-toggle" data-id="${esc(h.id)}" aria-label="${done ? 'Als offen markieren' : 'Erledigt'}">${boxMark(done)}</button>
     <div class="hw-main">
       <div class="text">${esc(h.text)}</div>
-      <div class="sub">${subjectDot(s)}${esc(s ? s.name : 'Sonstiges')}${h.source ? ` · <span class="src">${h.source === 'webuntis' ? 'WebUntis' : 'itslearning'}</span>` : ''} · <span class="${done ? '' : dueClass(h.due)}">fällig ${esc(relDay(h.due))}</span></div>
+      <div class="sub">${esc(s ? s.name : 'Sonstiges')}${h.source ? ` · <span class="src">${h.source === 'webuntis' ? 'WebUntis' : 'itslearning'}</span>` : ''} · <span class="${done ? '' : dueClass(h.due)}">fällig ${esc(relDay(h.due))}</span></div>
     </div>
-    <button class="icon-btn" data-action="hw-edit" data-id="${esc(h.id)}" aria-label="Bearbeiten">${ICON.edit}</button>
+    <div class="row tight">${pill}<button class="icon-btn" data-action="hw-edit" data-id="${esc(h.id)}" aria-label="Bearbeiten">${ICON.edit}</button></div>
   </div>`;
 }
 
@@ -844,9 +891,7 @@ function syncedWeek() {
       const ls = lessonsOn(day);
       return `<div class="wp-day ${day === today ? 'today' : ''}">
         <h3>${WD_SHORT[parse(day).getDay()]} ${parse(day).getDate()}.${day === today ? ' · heute' : ''}</h3>
-        ${ls.length ? `<div class="lessons">${ls.map(l => `
-          <div class="lesson ${l.status || ''}"><span class="nr">${esc(l.time || String(l.nr))}</span><span class="subj">${subjectDot(l.subj)}<span class="nm">${esc(l.subj.name)}</span></span>
-            ${l.status === 'cancelled' ? '<span class="info bad">fällt aus</span>' : ''}${l.info && l.status !== 'cancelled' ? `<span class="info">${esc(l.info)}</span>` : ''}</div>`).join('')}</div>`
+        ${ls.length ? `<div class="lessons">${ls.map(l => lessonRow(l, day, true)).join('')}</div>`
         : `<p class="empty small">${inHoliday(day) ? 'Ferien' : 'Keine Daten'}</p>`}
       </div>`;
     }).join('')}</div></div>
@@ -942,12 +987,12 @@ const COSMETICS = [
   // Farbe des Roboters
   { id: 'c-cyan', cat: 'color', name: 'Cyan', lvl: 1, v: '#22d3ee' },
   { id: 'c-orange', cat: 'color', name: 'Orange', lvl: 2, v: '#fb923c' },
-  { id: 'c-mint', cat: 'color', name: 'Mint', lvl: 3, v: '#4fe3c1' },
+  { id: 'c-mint', cat: 'color', name: 'Mint', lvl: 3, v: '#14b8a6', v2: '#7ef0c8' },
   { id: 'c-violet', cat: 'color', name: 'Lila', lvl: 5, v: '#a78bfa' },
   { id: 'c-red', cat: 'color', name: 'Signalrot', lvl: 6, v: '#f05252' },
   { id: 'c-polar', cat: 'color', name: 'Polarweiß', lvl: 8, v: '#e2e8f0' },
   { id: 'c-gold', cat: 'color', name: 'Gold', lvl: 9, v: '#facc15' },
-  { id: 'c-neon', cat: 'color', name: 'Neongrün', lvl: 11, v: '#a3e635' },
+  { id: 'c-neon', cat: 'color', name: 'Neongrün', lvl: 11, v: '#22c55e', v2: '#d9f99d' },
   { id: 'c-carbon', cat: 'color', name: 'Carbon', lvl: 12, v: '#475569' },
   { id: 'c-chrome', cat: 'color', name: 'Chrom', lvl: 14, v: '#b8c4d6' },
   { id: 'c-stealth', cat: 'color', name: 'Tarnkappe', lvl: 16, v: '#2a3150' },
@@ -987,14 +1032,14 @@ const COSMETICS = [
   { id: 'r-moon', cat: 'room', name: 'Mondoberfläche', lvl: 13 },
   { id: 'r-warp', cat: 'room', name: 'Hyperraum', lvl: 19 },
   // Farbe der ganzen App
-  { id: 't-amber', cat: 'theme', name: 'Bernstein', lvl: 1, v: '#ffb547' },
-  { id: 't-mint', cat: 'theme', name: 'Mint', lvl: 2, v: '#4fe3c1' },
-  { id: 't-cyan', cat: 'theme', name: 'Eis', lvl: 4, v: '#38bdf8' },
-  { id: 't-magenta', cat: 'theme', name: 'Magenta', lvl: 7, v: '#f472b6' },
-  { id: 't-red', cat: 'theme', name: 'Signalrot', lvl: 10, v: '#ff6b6b' },
-  { id: 't-violet', cat: 'theme', name: 'Ultraviolett', lvl: 14, v: '#a5b4fc' },
-  { id: 't-lime', cat: 'theme', name: 'Neon', lvl: 17, v: '#a3e635' },
-  { id: 't-white', cat: 'theme', name: 'Weißlicht', lvl: 20, v: '#f1f5f9' },
+  { id: 't-amber', cat: 'theme', name: 'Bernstein', lvl: 1, v: '#ff7a59', v2: '#ffc247' },
+  { id: 't-mint', cat: 'theme', name: 'Mint', lvl: 2, v: '#14b8a6', v2: '#7ef0c8' },
+  { id: 't-cyan', cat: 'theme', name: 'Eis', lvl: 4, v: '#3b82f6', v2: '#5cc8ff' },
+  { id: 't-magenta', cat: 'theme', name: 'Magenta', lvl: 7, v: '#db2777', v2: '#f9a8d4' },
+  { id: 't-red', cat: 'theme', name: 'Signalrot', lvl: 10, v: '#ff3d5a', v2: '#ff9a6b' },
+  { id: 't-violet', cat: 'theme', name: 'Ultraviolett', lvl: 14, v: '#6d5dfc', v2: '#b4a8ff' },
+  { id: 't-lime', cat: 'theme', name: 'Neon', lvl: 17, v: '#22c55e', v2: '#d9f99d' },
+  { id: 't-white', cat: 'theme', name: 'Weißlicht', lvl: 20, v: '#94a3b8', v2: '#ffffff' },
   // Titel
   { id: 'ti-rekrut', cat: 'title', name: 'Rekrut', lvl: 1 },
   { id: 'ti-kadett', cat: 'title', name: 'Kadett', lvl: 3 },
@@ -1088,6 +1133,7 @@ function robotSVG(eq = S.equipped, idp = 'r', headOnly = false) {
 function applyTheme() {
   const th = equippedOf('theme');
   document.documentElement.style.setProperty('--accent', th.v);
+  document.documentElement.style.setProperty('--accent2', th.v2 || th.v);
 }
 
 /* ---------- Ansicht: Ich ---------- */
@@ -1134,7 +1180,7 @@ function meProfile() {
     </section>
 
     <section class="card">
-      <div class="stats">
+      <div class="stats inner">
         <div class="stat"><div class="v">${st.count}</div><div class="l">Serie</div></div>
         <div class="stat"><div class="v">${S.bestStreak || st.count}</div><div class="l">Bestwert</div></div>
         <div class="stat"><div class="v">${st.jokerUsedThisWeek ? '0' : '1'}</div><div class="l">Joker</div></div>
@@ -1186,7 +1232,7 @@ function meShop() {
       <div class="cosmetics">${items.map(c => {
         const locked = c.lvl > lv;
         const on = S.equipped[c.cat] === c.id;
-        const sw = c.v ? `<span class="cos-sw" style="background:${c.v === 'holo' ? 'linear-gradient(135deg,#4fe3c1,#a78bfa,#f472b6)' : c.v}"></span>` : '';
+        const sw = c.v ? `<span class="cos-sw" style="background:${c.v === 'holo' ? 'linear-gradient(135deg,#4fe3c1,#a78bfa,#f472b6)' : c.v2 ? `linear-gradient(135deg,${c.v},${c.v2})` : c.v}"></span>` : '';
         return `<button class="cos ${on ? 'on' : ''} ${locked ? 'locked' : ''}" data-action="equip" data-id="${c.id}" ${locked ? 'disabled' : ''}>
           ${sw}<span class="n">${esc(c.name)}</span><span class="h">${locked ? ICON.lock + ' Level ' + c.lvl : on ? 'aktiv' : 'antippen'}</span></button>`;
       }).join('')}</div>
@@ -1415,14 +1461,15 @@ function render() {
   applyTheme();
   document.getElementById('view').innerHTML = VIEWS[current]();
   const tab = current === 'game' ? 'me' : current;
-  document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.go === tab));
-  const lv = levelInfo();
-  document.getElementById('xp-pill').innerHTML = `<span class="streak"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 2c.8 3.6 5 5.4 5 10.4A5 5 0 0 1 7 12.6c0-2.6 1.6-3.8 2.2-6 1.2 1.2 1.8 2.4 2 3.6.6-2.6 1-5.4.8-8.2z" fill="currentColor"/></svg>${st.count}</span><span>LV ${lv.lvl} · ${S.xp} XP</span>`;
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.go === tab));
 }
 function go(view) {
   if (!VIEWS[view]) return;
   current = view;
   history.replaceState(null, '', '#' + (view === 'game' ? 'me' : view));
+  const main = document.getElementById('view');
+  main.classList.remove('enter'); void main.offsetWidth; main.classList.add('enter');
+  clearTimeout(go.t); go.t = setTimeout(() => main.classList.remove('enter'), 700);
   render();
   window.scrollTo({ top: 0 });
 }
