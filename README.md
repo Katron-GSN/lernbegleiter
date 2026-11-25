@@ -4,7 +4,7 @@ Eine kleine Lern-App für Klasse 7 als Web-App (PWA). Sie läuft im Safari des i
 
 Alle Daten bleiben lokal auf dem Gerät. Die **Schulanbindung** holt Stundenplan, Ausfälle und Hausaufgaben aus WebUntis sowie Aufgaben aus itslearning. Einrichtung: [worker/README.md](worker/README.md). Einen von Hand eingetragenen Stundenplan gibt es nicht mehr.
 
-- **Heute:** Spruch des Tages, Briefing zum Vorlesen, „Als Nächstes“ mit genau einer Aufgabe und Fokus-Timer (20 Minuten), Tagesziel-Leiste, Stundenplan, Ranzen-Check, Hausaufgaben, Termine
+- **Heute:** Spruch des Tages, Briefing zum Lesen und Vorlesen, „Als Nächstes“ mit genau einer Aufgabe, Tagesziel-Leiste, Stundenplan, Ranzen-Check, Hausaufgaben, Termine
 - **Aufgaben:** Hausaufgaben eintragen und abhaken
 - **Termine:** eigener Schulkalender für Klassenarbeiten, Tests und Abgaben mit Countdown
 - **Plan:** Wochen-Stundenplan aus WebUntis, Fächer mit Farben und den Sachen für den Ranzen

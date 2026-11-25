@@ -119,12 +119,7 @@ main { max-width: 880px; margin: 0 auto; padding: 18px 16px 24px; outline: none;
 .mini-bot svg { width: 100%; height: 100%; }
 .quote { font-size: 1.05rem; font-weight: 550; line-height: 1.4; }
 .briefing-row { gap: 8px; }
-.brief-text { flex-basis: 100%; }
-.brief-text summary { color: var(--muted); font-size: .85rem; cursor: pointer; list-style: none; display: inline-block; }
-.brief-text summary::-webkit-details-marker { display: none; }
-.brief-text summary::before { content: "▸ "; }
-.brief-text[open] summary::before { content: "▾ "; }
-.brief-text .text { display: grid; gap: 6px; margin-top: 8px; color: #c9cde6; font-size: .95rem; }
+.brief-text { display: grid; gap: 6px; color: #c9cde6; font-size: .95rem; padding-top: 12px; border-top: 1px solid var(--line); }
 
 /* Als Nächstes */
 .next-card {
@@ -351,22 +346,6 @@ details.fold[open] summary::after { content: "–"; }
 .lights { --size: min(calc((100vw - 64px) / var(--n)), 76px); display: grid; grid-template-columns: repeat(var(--n), var(--size)); gap: 8px; width: max-content; margin: 0 auto; }
 .light { width: var(--size); height: var(--size); border-radius: 14px; border: 1px solid var(--line-strong); background: var(--panel-2); }
 .light.on { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 55%, transparent); }
-
-/* Fokus-Timer */
-.focus {
-  position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
-  padding: calc(24px + var(--safe-top)) 20px calc(24px + var(--safe-bottom));
-  background: rgba(6, 8, 18, .96); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-}
-.focus[hidden] { display: none; }
-.focus-inner { display: grid; gap: 16px; justify-items: center; text-align: center; max-width: 420px; }
-.focus-inner .label { color: var(--accent); }
-.focus-task { font-weight: 600; color: #c9cde6; }
-.focus-ring { position: relative; width: min(70vw, 260px); aspect-ratio: 1; }
-.focus-ring svg { width: 100%; height: 100%; }
-.focus-ring .trk { fill: none; stroke: var(--line); stroke-width: 6; }
-.focus-ring .prog { fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round; transition: stroke-dasharray 1s linear; }
-.focus-ring b { position: absolute; inset: 0; display: grid; place-items: center; font: 700 clamp(2.4rem, 12vw, 3.4rem)/1 var(--mono); font-variant-numeric: tabular-nums; }
 
 /* Formulare */
 label.field, div.field { display: grid; gap: 6px; font-size: .9rem; color: var(--muted); }

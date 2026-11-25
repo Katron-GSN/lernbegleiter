@@ -18,7 +18,6 @@ const XP = { ranzen: 5, briefing: 5, hwDone: 10, hwOnTime: 5, hwSelf: 5, dayGoal
 const STREAK_BONUS_FROM = 5;
 const STREAK_MULT = 1.2;
 const WEEK_GOAL_DAYS = 4;
-const FOCUS_MIN = 20;
 
 const pad = n => String(n).padStart(2, '0');
 const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -98,8 +97,7 @@ function defaultState() {
     badges: {},
     games: {},
     bestStreak: 0,
-    daily: null,
-    focus: null
+    daily: null
   };
 }
 
@@ -380,7 +378,6 @@ const ICON = {
   edit: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   check: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   lock: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2" fill="currentColor"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
-  timer: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="13" r="7.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 9v4l2.5 2M9.5 3h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
 };
 const boxMark = done => done ? ICON.check : '';
 
@@ -447,7 +444,8 @@ function briefingText() {
   const upcoming = S.events.filter(e => e.date >= today && diffDays(today, e.date) <= 7).sort((a, b) => a.date.localeCompare(b.date));
   upcoming.forEach(e => {
     const subj = subjectById(e.subjectId)?.name;
-    lines.push(`${e.type}${subj ? ' in ' + subj : ''} ${relDay(e.date) === 'heute' ? 'ist heute' : relDay(e.date).startsWith('in ') ? relDay(e.date) : 'am ' + relDay(e.date)}${e.topic ? ', Thema: ' + e.topic : ''}.`);
+    const rd = relDay(e.date);
+    lines.push(`${e.type}${subj ? ' in ' + subj : ''} ${rd === 'heute' ? 'ist heute' : ['morgen', 'übermorgen'].includes(rd) || rd.startsWith('in ') ? 'ist ' + rd : 'am ' + rd}${e.topic ? ', Thema: ' + e.topic : ''}.`);
   });
   const st = streakInfo().count;
   if (st >= 2) lines.push(`Deine Serie steht bei ${st} Schultagen.`);
@@ -496,7 +494,6 @@ function nextCard(t, rec) {
       <p class="meta">fällig ${esc(relDay(a.h.due))} · ${fmtDate(a.h.due)}${a.h.source ? ' · aus ' + (a.h.source === 'webuntis' ? 'WebUntis' : 'itslearning') : ''}</p>
       <div class="row">
         <button class="btn primary" data-action="hw-toggle" data-id="${esc(a.h.id)}">${ICON.check} Erledigt</button>
-        <button class="btn" data-action="focus-start" data-id="${esc(a.h.id)}">${ICON.timer} Fokus ${FOCUS_MIN} Min</button>
       </div>
       ${a.more > 0 ? `<p class="meta">Danach noch ${a.more} weitere</p>` : ''}
     </section>`;
@@ -559,10 +556,10 @@ function viewToday() {
         <div class="mini-bot" aria-hidden="true">${robotSVG(S.equipped, 'q', true)}</div>
         <div><span class="label">Spruch des Tages</span><p class="quote">${esc(quoteOfDay())}</p></div>
       </div>
+      <div class="brief-text">${briefingText().slice(2).map(l => `<p>${esc(l)}</p>`).join('')}</div>
       <div class="row briefing-row">
         <button class="btn small" data-action="speak">${speaking ? ICON.stop + ' Stopp' : ICON.play + ' Briefing anhören'}</button>
         ${rec.briefing ? `<span class="tag ok">Briefing ${ICON.check}</span>` : `<button class="btn small ghost" data-action="briefing-done">Gelesen · +${XP.briefing} XP</button>`}
-        <details class="brief-text"><summary>Text</summary><div class="text">${briefingText().slice(2).map(l => `<p>${esc(l)}</p>`).join('')}</div></details>
       </div>
     </section>
 
@@ -641,49 +638,6 @@ function evRow(e) {
     <div class="row tight">${e.date >= todayISO() ? countdownBadge(e.date) : ''}
       <button class="icon-btn" data-action="ev-edit" data-id="${esc(e.id)}" aria-label="Bearbeiten">${ICON.edit}</button></div>
   </div>`;
-}
-
-/* ---------- Fokus-Timer ---------- */
-
-let focusTick = null;
-function startFocus(hwId) {
-  S.focus = { end: Date.now() + FOCUS_MIN * 60000, hwId: hwId || null };
-  save();
-  renderFocus();
-}
-function renderFocus() {
-  const el = document.getElementById('focus');
-  if (!el) return;
-  if (!S.focus) { el.hidden = true; el.innerHTML = ''; clearInterval(focusTick); focusTick = null; return; }
-  el.hidden = false;
-  const h = S.focus.hwId && S.homework.find(x => x.id === S.focus.hwId);
-  const s = h && subjectById(h.subjectId);
-  const left = Math.max(0, S.focus.end - Date.now());
-  const task = h ? `<p class="focus-task">${s ? esc(s.name) + ' · ' : ''}${esc(h.text)}</p>` : '';
-  if (left === 0) {
-    clearInterval(focusTick); focusTick = null;
-    el.innerHTML = `<div class="focus-inner">
-      <span class="label">Fokus-Zeit geschafft</span>${task}
-      <h2>Stark. Jetzt 5 Minuten Pause.</h2>
-      <div class="row center">
-        ${h && !h.doneAt ? `<button class="btn primary" data-action="focus-done">${ICON.check} Aufgabe erledigt</button>` : ''}
-        <button class="btn" data-action="focus-again">Noch eine Runde</button>
-        <button class="btn ghost" data-action="focus-stop">Schließen</button>
-      </div></div>`;
-    return;
-  }
-  const total = FOCUS_MIN * 60000;
-  const C = 2 * Math.PI * 54;
-  const sec = Math.ceil(left / 1000);
-  el.innerHTML = `<div class="focus-inner">
-    <span class="label">Fokus-Zeit</span>${task}
-    <div class="focus-ring"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="trk" cx="60" cy="60" r="54"/>
-      <circle class="prog" cx="60" cy="60" r="54" stroke-dasharray="${(C * (1 - left / total)).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 60 60)"/></svg>
-      <b>${Math.floor(sec / 60)}:${pad(sec % 60)}</b></div>
-    <p class="muted">Eine Sache, Handy weg, bis die Zeit um ist.</p>
-    <button class="btn ghost" data-action="focus-stop">Abbrechen</button>
-  </div>`;
-  if (!focusTick) focusTick = setInterval(renderFocus, 1000);
 }
 
 /* ---------- Ansicht: Hausaufgaben ---------- */
@@ -1439,7 +1393,6 @@ function render() {
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.go === tab));
   const lv = levelInfo();
   document.getElementById('xp-pill').innerHTML = `<span class="streak"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 2c.8 3.6 5 5.4 5 10.4A5 5 0 0 1 7 12.6c0-2.6 1.6-3.8 2.2-6 1.2 1.2 1.8 2.4 2 3.6.6-2.6 1-5.4.8-8.2z" fill="currentColor"/></svg>${st.count}</span><span>LV ${lv.lvl} · ${S.xp} XP</span>`;
-  renderFocus();
 }
 function go(view) {
   if (!VIEWS[view]) return;
@@ -1509,10 +1462,6 @@ document.addEventListener('click', ev => {
     case 'album': albumOffset = Math.min(0, albumOffset + Number(el.dataset.dir)); render(); break;
     case 'daily-start': startGame(dailyGame().id, true); break;
     case 'game-start': startGame(id, false); break;
-    case 'focus-start': startFocus(id); break;
-    case 'focus-stop': S.focus = null; save(); renderFocus(); break;
-    case 'focus-again': startFocus(S.focus && S.focus.hwId); break;
-    case 'focus-done': { const hid = S.focus && S.focus.hwId; S.focus = null; save(); if (hid) toggleHomework(hid); else render(); break; }
     case 'open-settings': meTab = 'settings'; go('me'); break;
     case 'holiday-new': openHolidayDialog(); break;
     case 'holiday-delete':
