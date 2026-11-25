@@ -144,6 +144,17 @@ main { max-width: 880px; margin: 0 auto; padding: 18px 16px 24px; outline: none;
 .reward-row { display: flex; gap: 14px; align-items: center; }
 .reward-row > div { display: grid; gap: 4px; min-width: 0; }
 
+/* Selbst wählen, was als Nächstes dran ist */
+.chooser { margin-top: 2px; }
+.pick-list { display: grid; gap: 6px; }
+.pick {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left;
+  padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line-strong); background: rgba(8, 10, 23, .45); min-height: 48px;
+}
+.pick-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.pick-main b { font-weight: 600; overflow-wrap: anywhere; }
+.pick .meta { flex: none; font-size: .82rem; }
+
 /* Tagesziel-Leiste */
 .goal-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .seg-item {

@@ -474,14 +474,37 @@ function nextAction(t, rec) {
   const today = todayISO();
   const horizon = nextSchoolDay(today);
   const open = S.homework.filter(h => !h.doneAt).sort((a, b) => a.due.localeCompare(b.due));
-  const urgent = open.filter(h => h.due <= horizon);
-  if (urgent.length) return { kind: 'hw', h: urgent[0], label: urgent[0].due < today ? 'Überfällig' : 'Als Nächstes', more: urgent.length - 1 };
   const items = ranzenItems(t.date);
   const missing = items.filter(i => !S.ranzen.checked.includes(i.txt)).length;
+  // Paul kann selbst wählen, was er als Nächstes macht. Die Wahl gilt bis sie erledigt ist oder bis morgen.
+  const pick = S.nextPick && S.nextPick.date === today ? S.nextPick.id : null;
+  if (pick === 'ranzen' && !rec.ranzen && missing) return { kind: 'ranzen', missing, chosen: true };
+  const ph = pick && open.find(h => h.id === pick);
+  if (ph) return { kind: 'hw', h: ph, label: 'Deine Wahl', chosen: true };
+  const urgent = open.filter(h => h.due <= horizon);
+  if (urgent.length) return { kind: 'hw', h: urgent[0], label: urgent[0].due < today ? 'Überfällig' : 'Als Nächstes' };
   if (!rec.ranzen && missing) return { kind: 'ranzen', missing };
   if (rec.goal && !dailySolved()) return { kind: 'puzzle' };
-  if (open.length) return { kind: 'hw', h: open[0], label: 'Vorarbeiten', more: open.length - 1 };
+  if (open.length) return { kind: 'hw', h: open[0], label: 'Vorarbeiten' };
   return { kind: 'free' };
+}
+
+let nextChoosing = false;
+function nextChooser(a, t, rec) {
+  const open = S.homework.filter(h => !h.doneAt).sort((x, y) => x.due.localeCompare(y.due));
+  const opts = open.filter(h => !(a.kind === 'hw' && a.h.id === h.id)).map(h => {
+    const s = subjectById(h.subjectId);
+    return { id: h.id, tag: s ? `<span class="subj-tag" style="--c:${esc(s.color)}">${esc(s.name)}</span>` : '', text: h.text, meta: 'fällig ' + relDay(h.due) };
+  });
+  const missing = ranzenItems(t.date).filter(i => !S.ranzen.checked.includes(i.txt)).length;
+  if (a.kind !== 'ranzen' && !rec.ranzen && missing) opts.push({ id: 'ranzen', tag: '', text: 'Ranzen packen', meta: `noch ${missing} Sache${missing === 1 ? '' : 'n'}` });
+  if (!opts.length && !a.chosen) return '';
+  return `<div class="row tight chooser">
+      ${opts.length ? `<button class="btn small ghost" data-action="next-choose">${nextChoosing ? 'Auswahl schließen' : `Lieber etwas anderes (${opts.length})`}</button>` : ''}
+      ${a.chosen ? `<button class="btn small ghost" data-action="next-auto">Automatisch</button>` : ''}
+    </div>
+    ${nextChoosing && opts.length ? `<div class="pick-list">${opts.map(o => `<button class="pick" data-action="next-pick" data-id="${esc(o.id)}">
+      <span class="pick-main">${o.tag}<b>${esc(o.text)}</b></span><span class="meta">${esc(o.meta)}</span></button>`).join('')}</div>` : ''}`;
 }
 
 function nextCard(t, rec) {
@@ -495,7 +518,7 @@ function nextCard(t, rec) {
       <div class="row">
         <button class="btn primary" data-action="hw-toggle" data-id="${esc(a.h.id)}">${ICON.check} Erledigt</button>
       </div>
-      ${a.more > 0 ? `<p class="meta">Danach noch ${a.more} weitere</p>` : ''}
+      ${nextChooser(a, t, rec)}
     </section>`;
   }
   if (a.kind === 'ranzen') {
@@ -504,6 +527,7 @@ function nextCard(t, rec) {
       <h2>Ranzen packen für ${esc(t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label)}</h2>
       <p class="meta">Noch ${a.missing} Sache${a.missing === 1 ? '' : 'n'} · danach ist das Tagesziel geschafft</p>
       <div class="row"><button class="btn primary" data-action="scroll-ranzen">Zum Ranzen-Check</button></div>
+      ${nextChooser(a, t, rec)}
     </section>`;
   }
   if (a.kind === 'puzzle') {
@@ -512,6 +536,7 @@ function nextCard(t, rec) {
       <span class="label">Tagesziel geschafft</span>
       <div class="reward-row">${stickerSVG(g.id, 52)}<div><h2>Dein Tagesrätsel: ${esc(g.name)}</h2><p class="meta">Lösen und den Sticker fürs Album holen</p></div></div>
       <div class="row"><button class="btn primary" data-action="daily-start">Rätsel starten</button></div>
+      ${nextChooser(a, t, rec)}
     </section>`;
   }
   return `<section class="next-card calm">
@@ -1431,6 +1456,9 @@ document.addEventListener('click', ev => {
       afterAction(g, g ? 'Ranzen gepackt' : '');
       break;
     }
+    case 'next-choose': nextChoosing = !nextChoosing; render(); break;
+    case 'next-pick': S.nextPick = { date: todayISO(), id }; nextChoosing = false; save(); render(); break;
+    case 'next-auto': S.nextPick = null; nextChoosing = false; save(); render(); break;
     case 'scroll-ranzen': document.getElementById('ranzen')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
     case 'hw-new': openHomeworkDialog(); break;
     case 'hw-edit': openHomeworkDialog(id); break;
