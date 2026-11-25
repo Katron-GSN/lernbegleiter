@@ -1,8 +1,8 @@
 // Service Worker: macht die App offline nutzbar.
 // Bei jeder Änderung an den Dateien VERSION erhöhen, damit das iPad die neue Version lädt.
-const VERSION = 'v6';
+const VERSION = 'v7';
 const CACHE = 'lernbegleiter-' + VERSION;
-const FILES = ['./', './index.html', './styles.css', './app.js', './manifest.webmanifest',
+const FILES = ['./', './index.html', './styles.css', './app.js', './quotes.js', './games.js', './manifest.webmanifest',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

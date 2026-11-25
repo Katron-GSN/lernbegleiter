@@ -2,13 +2,18 @@
 
 Eine kleine Lern-App für Klasse 7 als Web-App (PWA). Sie läuft im Safari des iPads und lässt sich auf den Homescreen legen. Ein Mac oder App Store ist nicht nötig.
 
-**Phase 1** funktioniert ganz ohne Schulsysteme, alle Daten bleiben lokal auf dem Gerät. Optional holt die **Schulanbindung** Stundenplan, Ausfälle, Hausaufgaben und Prüfungen aus WebUntis sowie Aufgaben aus itslearning. Einrichtung: [worker/README.md](worker/README.md).
+Alle Daten bleiben lokal auf dem Gerät. Die **Schulanbindung** holt Stundenplan, Ausfälle und Hausaufgaben aus WebUntis sowie Aufgaben aus itslearning. Einrichtung: [worker/README.md](worker/README.md). Einen von Hand eingetragenen Stundenplan gibt es nicht mehr.
 
-- **Heute:** Briefing mit Vorlese-Button, Stundenplan, Ranzen-Check, fällige Hausaufgaben, nahende Termine, Tages- und Wochenziel
+- **Heute:** Spruch des Tages, Briefing zum Vorlesen, „Als Nächstes“ mit genau einer Aufgabe und Fokus-Timer (20 Minuten), Tagesziel-Leiste, Stundenplan, Ranzen-Check, Hausaufgaben, Termine
 - **Aufgaben:** Hausaufgaben eintragen und abhaken
 - **Termine:** eigener Schulkalender für Klassenarbeiten, Tests und Abgaben mit Countdown
-- **Plan:** Wochen-Stundenplan, Fächer mit Farben und den Sachen für den Ranzen
-- **Ich:** XP, Level, Serie mit Joker, Roboter-Avatar mit freischaltbaren Teilen, Ferien, Datensicherung
+- **Plan:** Wochen-Stundenplan aus WebUntis, Fächer mit Farben und den Sachen für den Ranzen
+- **Ich → Profil:** Level, Serie mit Joker, Bestwert, Abzeichen
+- **Ich → Werkstatt:** 56 freischaltbare Teile in acht Gruppen, darunter Begleiter, Hintergrund-Räume, Titel und die Akzentfarbe der ganzen App
+- **Ich → Rätsel:** Tagesrätsel (öffnet sich mit dem Tagesziel, gibt einen Sticker fürs Monatsalbum) und Spielecke mit Sudoku 4×4/6×6/9×9, Kopfrechnen, Vokabel-Memory, Zahlenfolgen und Schalter-Rätsel. Rätsel geben keine XP.
+- **Ich → Einstellungen:** Name, Ferien, Schulanbindung, Datensicherung
+
+Die Sprüche stehen in `quotes.js` (rund 300, je Schuljahr neu gemischt; vor eingetragenen Tests, nach Ferien und bei Serien-Meilensteinen kommen passende Sprüche). Die Rätsel stehen in `games.js`.
 
 ## XP-Regeln
 

@@ -1,5 +1,6 @@
-/* Lernbegleiter – Phase 1
+/* Lernbegleiter
  * Reine PWA, alle Daten liegen lokal im Browser (localStorage).
+ * Weitere Dateien: quotes.js (Sprüche des Tages), games.js (Rätsel und Spielecke).
  */
 'use strict';
 
@@ -9,6 +10,7 @@ const STORE_KEY = 'lernbegleiter.v1';
 const WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
 const WD_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
 const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+const MONTHS_LONG = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
 const COLORS = ['#f87171', '#fb923c', '#facc15', '#a3e635', '#34d399', '#22d3ee', '#60a5fa', '#818cf8', '#c084fc', '#f472b6', '#94a3b8', '#e2e8f0'];
 const EVENT_TYPES = ['Klassenarbeit', 'Test', 'Referat', 'Abgabe', 'Sonstiges'];
 
@@ -16,6 +18,7 @@ const XP = { ranzen: 5, briefing: 5, hwDone: 10, hwOnTime: 5, hwSelf: 5, dayGoal
 const STREAK_BONUS_FROM = 5;
 const STREAK_MULT = 1.2;
 const WEEK_GOAL_DAYS = 4;
+const FOCUS_MIN = 20;
 
 const pad = n => String(n).padStart(2, '0');
 const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -54,6 +57,8 @@ function relDay(s) {
 
 /* ---------- Zustand ---------- */
 
+const DEFAULT_EQUIPPED = { color: 'c-cyan', antenna: 'a-basic', eyes: 'e-basic', extra: 'x-none', buddy: 'b-none', room: 'r-none', theme: 't-amber', title: 'ti-rekrut' };
+
 function defaultState() {
   const subj = (name, color, items) => ({ id: uid(), name, color, items });
   const subjects = [
@@ -73,7 +78,6 @@ function defaultState() {
     version: 1,
     settings: {
       name: 'Paul',
-      periods: 8,
       afterSchoolHour: 14,
       baseItems: ['Federmäppchen', 'iPad geladen', 'Trinkflasche'],
       holidays: [],
@@ -82,7 +86,6 @@ function defaultState() {
     },
     sync: null,
     subjects,
-    timetable: { 1: [], 2: [], 3: [], 4: [], 5: [] },
     homework: [],
     events: [],
     xp: 0,
@@ -90,14 +93,28 @@ function defaultState() {
     days: {},
     weeks: {},
     ranzen: { date: null, checked: [] },
-    equipped: { color: 'c-cyan', antenna: 'a-basic', eyes: 'e-basic', extra: 'x-none' }
+    equipped: { ...DEFAULT_EQUIPPED },
+    stickers: {},
+    badges: {},
+    games: {},
+    bestStreak: 0,
+    daily: null,
+    focus: null
   };
 }
 
+function normalize(data) {
+  const d = defaultState();
+  const s = Object.assign(d, data);
+  s.settings = Object.assign(defaultState().settings, data.settings || {});
+  s.equipped = Object.assign({ ...DEFAULT_EQUIPPED }, data.equipped || {});
+  s.stickers ||= {}; s.badges ||= {}; s.games ||= {};
+  return s;
+}
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) return Object.assign(defaultState(), JSON.parse(raw));
+    if (raw) return normalize(JSON.parse(raw));
   } catch (e) { console.warn('Laden fehlgeschlagen', e); }
   return defaultState();
 }
@@ -141,21 +158,13 @@ function subjectFor(name, short) {
   return matchSubject(name, short) || { id: 'x:' + (short || name), name: name || short || 'Unterricht', color: '#94a3b8', items: [] };
 }
 
+/* Stunden eines Tages. Der Stundenplan kommt nur noch aus WebUntis. */
 function lessonsOn(s) {
-  const wd = parse(s).getDay();
+  if (inHoliday(s)) return [];
   const synced = S.sync && Array.isArray(S.sync.lessons) ? S.sync.lessons.filter(l => l.date === s) : [];
-  if (synced.length) {
-    return synced.map((l, i) => ({ nr: i + 1, time: l.start, subj: subjectFor(l.subject, l.short), status: l.status, info: l.info, room: l.room }));
-  }
-  if (wd < 1 || wd > 5 || inHoliday(s)) return [];
-  const row = S.timetable[wd] || [];
-  const out = [];
-  for (let i = 0; i < S.settings.periods; i++) {
-    const subj = row[i] && subjectById(row[i]);
-    if (subj) out.push({ nr: i + 1, subj });
-  }
-  return out;
+  return synced.map((l, i) => ({ nr: i + 1, time: l.start, subj: subjectFor(l.subject, l.short), status: l.status, info: l.info, room: l.room }));
 }
+const syncConfigured = () => !!(S.settings.syncUrl && S.settings.syncKey);
 
 /* Serie: zählt Schultage mit Aktivität. Wochenenden und Ferien unterbrechen nicht.
  * Ein verpasster Schultag pro Woche wird automatisch durch den Joker gerettet. */
@@ -205,10 +214,11 @@ function award(base, reason, key) {
   const amount = bonus ? Math.round(base * STREAK_MULT) : base;
   S.xp += amount;
   S.log.unshift({ d: todayISO(), a: amount, r: reason, k: key || null });
-  S.log = S.log.slice(0, 300);
+  S.log = S.log.slice(0, 1500);
   const after = levelInfo().lvl;
   if (after > before) {
-    setTimeout(() => toast(`Level ${after}! Neues für deinen Roboter freigeschaltet.`, 'level'), 900);
+    const game = GAMES.find(g => g.lvl === after);
+    setTimeout(() => toast(`Level ${after}! ${game ? 'Neu in der Spielecke: ' + game.name : 'Neues in der Werkstatt'}`, 'level'), 900);
   }
   return amount;
 }
@@ -224,6 +234,7 @@ function markActive() {
   dayRec(todayISO()).active = true;
 }
 
+let goalJustReached = false;
 function checkGoals() {
   const today = todayISO();
   let gained = 0;
@@ -232,24 +243,106 @@ function checkGoals() {
   const openSoon = S.homework.filter(h => !h.doneAt && h.due <= tomorrow);
   if (!rec.goal && rec.ranzen && openSoon.length === 0) {
     rec.goal = true;
+    goalJustReached = true;
     gained += award(XP.dayGoal, 'Tagesziel erreicht', 'goal:' + today);
   }
   const wk = isoWeekKey(today);
-  const mon = mondayOf(today);
-  let goals = 0;
-  for (let i = 0; i < 7; i++) { const r = S.days[addDays(mon, i)]; if (r && r.goal) goals++; }
-  if (goals >= WEEK_GOAL_DAYS && !S.weeks[wk]) {
+  if (weekGoalCount() >= WEEK_GOAL_DAYS && !S.weeks[wk]) {
     S.weeks[wk] = true;
     gained += award(XP.weekGoal, 'Wochenziel erreicht', 'week:' + wk);
   }
   return gained;
 }
+function weekGoalCount() {
+  const mon = mondayOf(todayISO());
+  let n = 0;
+  for (let i = 0; i < 7; i++) { const r = S.days[addDays(mon, i)]; if (r && r.goal) n++; }
+  return n;
+}
 
 function afterAction(gained, msg) {
   gained += checkGoals();
+  checkBadges();
   save();
-  if (gained > 0) toast(`+${gained} XP${msg ? ' · ' + msg : ''}`);
+  if (goalJustReached) { goalJustReached = false; toast(`+${gained} XP · Tagesziel geschafft, das Tagesrätsel ist frei`, 'level'); }
+  else if (gained > 0) toast(`+${gained} XP${msg ? ' · ' + msg : ''}`);
   render();
+}
+
+/* ---------- Abzeichen ---------- */
+
+const countLog = prefix => S.log.filter(l => l.k && l.k.startsWith(prefix)).length;
+const BADGES = [
+  { id: 'start', code: 'GO', name: 'Gestartet', desc: 'Die ersten XP gesammelt', test: () => S.xp > 0 },
+  { id: 'ranzen20', code: 'R20', name: 'Ranzen-Profi', desc: '20 Ranzen-Checks', test: () => countLog('ranzen:') >= 20 },
+  { id: 'ontime10', code: 'P10', name: 'Pünktlich', desc: '10 Hausaufgaben pünktlich erledigt', test: () => countLog('hwt:') >= 10 },
+  { id: 'self5', code: 'S5', name: 'Selbstständig', desc: '5 selbst eingetragene Aufgaben erledigt', test: () => countLog('hws:') >= 5 },
+  { id: 'week1', code: 'W1', name: 'Wochensieg', desc: 'Erstes Wochenziel geschafft', test: () => countLog('week:') >= 1 },
+  { id: 'week5', code: 'W5', name: 'Dauerläufer', desc: '5 Wochenziele geschafft', test: () => countLog('week:') >= 5 },
+  { id: 'streak5', code: '5', name: 'Serie 5', desc: '5 Schultage am Stück', test: () => S.bestStreak >= 5 },
+  { id: 'streak10', code: '10', name: 'Serie 10', desc: '10 Schultage am Stück', test: () => S.bestStreak >= 10 },
+  { id: 'streak25', code: '25', name: 'Serie 25', desc: '25 Schultage am Stück', test: () => S.bestStreak >= 25 },
+  { id: 'puzzle1', code: 'T1', name: 'Tüftler', desc: 'Erstes Tagesrätsel gelöst', test: () => Object.keys(S.stickers).length >= 1 },
+  { id: 'puzzle10', code: 'T10', name: 'Rätselfuchs', desc: '10 Tagesrätsel gelöst', test: () => Object.keys(S.stickers).length >= 10 },
+  { id: 'sudoku9', code: '9×9', name: 'Großmeister', desc: 'Ein Sudoku 9×9 gelöst', test: () => !!S.games.sudoku9 },
+  { id: 'level10', code: 'L10', name: 'Level 10', desc: 'Level 10 erreicht', test: () => levelInfo().lvl >= 10 }
+];
+function checkBadges() {
+  const fresh = BADGES.filter(b => !S.badges[b.id] && b.test());
+  fresh.forEach(b => { S.badges[b.id] = todayISO(); });
+  if (fresh.length) setTimeout(() => toast(`Neues Abzeichen: ${fresh.map(b => b.name).join(', ')}`, 'level'), 1600);
+}
+function badgeSVG(b, earned) {
+  return `<svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true">
+    <path d="M24 3 L42 13.5 L42 34.5 L24 45 L6 34.5 L6 13.5 Z" fill="${earned ? 'var(--accent)' : 'none'}" stroke="${earned ? 'var(--accent)' : 'var(--line-strong)'}" stroke-width="2" ${earned ? '' : 'stroke-dasharray="4 3"'}/>
+    <text x="24" y="28.5" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="${b.code.length > 2 ? 10 : 12}" font-weight="700" fill="${earned ? 'var(--accent-ink)' : 'var(--muted)'}">${esc(b.code)}</text>
+  </svg>`;
+}
+
+/* ---------- Spruch des Tages ---------- */
+
+function schoolYearStart(s) {
+  const d = parse(s);
+  const y = d.getMonth() >= 7 ? d.getFullYear() : d.getFullYear() - 1;
+  return `${y}-08-01`;
+}
+function pickFrom(list, key, n) {
+  // Jedes Schuljahr eine neue Reihenfolge, innerhalb des Jahres keine Wiederholung, solange die Liste reicht.
+  const order = shuffled(range(list.length), mulberry32(seedFrom(key)));
+  return list[order[((n % list.length) + list.length) % list.length]];
+}
+function fill(t, vars) { return t.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? ''); }
+
+function quoteOfDay(s = todayISO()) {
+  const wd = parse(s).getDay();
+  const start = schoolYearStart(s);
+  const dayN = diffDays(start, s);
+  if (inHoliday(s)) return pickFrom(QUOTES.holiday, 'h' + start, dayN);
+  // Test heute (vor Schulschluss) oder am nächsten Schultag
+  const evName = e => { const sb = subjectById(e.subjectId); return e.type + (sb ? ' in ' + sb.name : ''); };
+  const hour = new Date().getHours();
+  const todayEv = S.events.find(e => e.date === s && ['Klassenarbeit', 'Test'].includes(e.type));
+  if (todayEv && hour < S.settings.afterSchoolHour) return fill(pickFrom(QUOTES.testToday, 'tt' + start, dayN), { was: evName(todayEv) });
+  const next = nextSchoolDay(s);
+  const nextEv = S.events.find(e => e.date === next && ['Klassenarbeit', 'Test'].includes(e.type));
+  if (nextEv) {
+    const wann = diffDays(s, next) === 1 ? 'Morgen' : 'Am ' + WEEKDAYS[parse(next).getDay()];
+    return fill(pickFrom(QUOTES.testSoon, 'ts' + start, dayN), { wann, was: evName(nextEv) });
+  }
+  if (isSchoolDay(s) && (inHoliday(addDays(s, -1)) || (wd === 1 && inHoliday(addDays(s, -3))))) return pickFrom(QUOTES.backToSchool, 'b' + start, dayN);
+  const st = streakInfo().count;
+  if ([5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 100, 150, 200].includes(st) && S.days[s] && S.days[s].active) {
+    return fill(pickFrom(QUOTES.streak, 's' + start, st), { n: st });
+  }
+  // Zähler je Wochentagsgruppe seit Schuljahresbeginn
+  let n = 0;
+  const group = wd === 1 ? 'monday' : wd === 5 ? 'friday' : wd === 0 || wd === 6 ? 'weekend' : 'general';
+  for (let d = start; d < s; d = addDays(d, 1)) {
+    const w = parse(d).getDay();
+    const g = w === 1 ? 'monday' : w === 5 ? 'friday' : w === 0 || w === 6 ? 'weekend' : 'general';
+    if (g === group) n++;
+  }
+  return pickFrom(QUOTES[group], group + start, n);
 }
 
 /* ---------- UI-Helfer ---------- */
@@ -260,7 +353,7 @@ function toast(text, kind) {
   el.textContent = text;
   el.className = 'toast show' + (kind ? ' ' + kind : '');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.className = 'toast'; }, 2600);
+  toastTimer = setTimeout(() => { el.className = 'toast'; }, kind === 'level' ? 3600 : 2600);
 }
 
 function subjectDot(s) { return `<span class="dot" style="background:${esc(s ? s.color : '#94a3b8')}"></span>`; }
@@ -281,6 +374,15 @@ function countdownBadge(date) {
   const label = n === 0 ? 'heute' : n === 1 ? 'morgen' : `noch ${n} Tage`;
   return `<span class="countdown ${cls}">${label}</span>`;
 }
+const ICON = {
+  play: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M7 5v14l12-7z" fill="currentColor"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  check: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2" fill="currentColor"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+  timer: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="13" r="7.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 9v4l2.5 2M9.5 3h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+};
+const boxMark = done => done ? ICON.check : '';
 
 /* ---------- Ansicht: Heute ---------- */
 
@@ -313,6 +415,7 @@ function briefingText() {
   const lines = [];
   const hour = new Date().getHours();
   lines.push(hour < 11 ? `Moin ${name}!` : hour < 17 ? `Hey ${name}!` : `Na ${name}, Feierabend in Sicht?`);
+  lines.push(`Spruch des Tages: ${quoteOfDay()}`);
   if (lessons.length) {
     const running = lessons.filter(l => l.status !== 'cancelled');
     const names = [];
@@ -320,14 +423,14 @@ function briefingText() {
     if (running.length && running[0].time) {
       lines.push(`${t.label} hast du ${running.length} Stunden, los geht's um ${running[0].time} Uhr: ${names.join(', ')}.`);
     } else if (running.length) {
-      lines.push(`${t.label} hast du ${running.length} Stunden, von der ${running[0].nr}. bis zur ${running[running.length - 1].nr}. Stunde: ${names.join(', ')}.`);
+      lines.push(`${t.label} hast du ${running.length} Stunden: ${names.join(', ')}.`);
     }
     const cancelled = lessons.filter(l => l.status === 'cancelled');
-    if (cancelled.length) lines.push(`Fällt aus: ${cancelled.map(l => (l.time ? l.time + ' Uhr ' : l.nr + '. Stunde ') + l.subj.name).join(', ')}.`);
+    if (cancelled.length) lines.push(`Fällt aus: ${cancelled.map(l => (l.time ? l.time + ' Uhr ' : '') + l.subj.name).join(', ')}.`);
     const changed = lessons.filter(l => l.status === 'changed');
     if (changed.length) lines.push(`Geändert: ${changed.map(l => l.subj.name + (l.info ? ' (' + l.info + ')' : '')).join(', ')}.`);
-  } else {
-    lines.push(`${t.label} ist noch kein Stundenplan eingetragen. Das kannst du unter „Plan“ machen.`);
+  } else if (!inHoliday(t.date)) {
+    lines.push(`Für ${t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label} habe ich noch keinen Stundenplan aus WebUntis.`);
   }
   const items = ranzenItems(t.date).map(i => i.txt);
   if (items.length) lines.push(`Für den Ranzen: ${items.join(', ')}.`);
@@ -336,7 +439,7 @@ function briefingText() {
   const soon = open.filter(h => h.due >= today && h.due <= t.date);
   if (late.length) lines.push(`Achtung, ${late.length === 1 ? 'eine Hausaufgabe ist' : late.length + ' Hausaufgaben sind'} schon überfällig.`);
   if (soon.length) {
-    lines.push(`Bis ${t.label === 'Heute' ? 'heute' : t.label.toLowerCase() === 'morgen' ? 'morgen' : t.label} fällig: ` +
+    lines.push(`Bis ${t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label} fällig: ` +
       soon.map(h => `${subjectById(h.subjectId)?.name || 'Sonstiges'}: ${h.text}`).join('; ') + '.');
   } else if (!late.length) {
     lines.push('Bis dahin ist keine Hausaufgabe fällig. Stark.');
@@ -347,7 +450,7 @@ function briefingText() {
     lines.push(`${e.type}${subj ? ' in ' + subj : ''} ${relDay(e.date) === 'heute' ? 'ist heute' : relDay(e.date).startsWith('in ') ? relDay(e.date) : 'am ' + relDay(e.date)}${e.topic ? ', Thema: ' + e.topic : ''}.`);
   });
   const st = streakInfo().count;
-  if (st >= 2) lines.push(`Deine Serie steht bei ${st} Schultagen. Weiter so!`);
+  if (st >= 2) lines.push(`Deine Serie steht bei ${st} Schultagen.`);
   lines.push('Viel Erfolg!');
   return lines;
 }
@@ -368,14 +471,65 @@ function speak(lines) {
   render();
 }
 
+/* Was ist als Nächstes dran? Genau eine Sache, damit der Anfang leicht fällt. */
+function nextAction(t, rec) {
+  const today = todayISO();
+  const horizon = nextSchoolDay(today);
+  const open = S.homework.filter(h => !h.doneAt).sort((a, b) => a.due.localeCompare(b.due));
+  const urgent = open.filter(h => h.due <= horizon);
+  if (urgent.length) return { kind: 'hw', h: urgent[0], label: urgent[0].due < today ? 'Überfällig' : 'Als Nächstes', more: urgent.length - 1 };
+  const items = ranzenItems(t.date);
+  const missing = items.filter(i => !S.ranzen.checked.includes(i.txt)).length;
+  if (!rec.ranzen && missing) return { kind: 'ranzen', missing };
+  if (rec.goal && !dailySolved()) return { kind: 'puzzle' };
+  if (open.length) return { kind: 'hw', h: open[0], label: 'Vorarbeiten', more: open.length - 1 };
+  return { kind: 'free' };
+}
+
+function nextCard(t, rec) {
+  const a = nextAction(t, rec);
+  if (a.kind === 'hw') {
+    const s = subjectById(a.h.subjectId);
+    return `<section class="next-card ${a.label === 'Überfällig' ? 'late' : ''}">
+      <span class="label">${a.label}</span>
+      <h2>${s ? `<span class="subj-tag" style="--c:${esc(s.color)}">${esc(s.name)}</span>` : ''}${esc(a.h.text)}</h2>
+      <p class="meta">fällig ${esc(relDay(a.h.due))} · ${fmtDate(a.h.due)}${a.h.source ? ' · aus ' + (a.h.source === 'webuntis' ? 'WebUntis' : 'itslearning') : ''}</p>
+      <div class="row">
+        <button class="btn primary" data-action="hw-toggle" data-id="${esc(a.h.id)}">${ICON.check} Erledigt</button>
+        <button class="btn" data-action="focus-start" data-id="${esc(a.h.id)}">${ICON.timer} Fokus ${FOCUS_MIN} Min</button>
+      </div>
+      ${a.more > 0 ? `<p class="meta">Danach noch ${a.more} weitere</p>` : ''}
+    </section>`;
+  }
+  if (a.kind === 'ranzen') {
+    return `<section class="next-card">
+      <span class="label">Als Nächstes</span>
+      <h2>Ranzen packen für ${esc(t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label)}</h2>
+      <p class="meta">Noch ${a.missing} Sache${a.missing === 1 ? '' : 'n'} · danach ist das Tagesziel geschafft</p>
+      <div class="row"><button class="btn primary" data-action="scroll-ranzen">Zum Ranzen-Check</button></div>
+    </section>`;
+  }
+  if (a.kind === 'puzzle') {
+    const g = dailyGame();
+    return `<section class="next-card reward">
+      <span class="label">Tagesziel geschafft</span>
+      <div class="reward-row">${stickerSVG(g.id, 52)}<div><h2>Dein Tagesrätsel: ${esc(g.name)}</h2><p class="meta">Lösen und den Sticker fürs Album holen</p></div></div>
+      <div class="row"><button class="btn primary" data-action="daily-start">Rätsel starten</button></div>
+    </section>`;
+  }
+  return `<section class="next-card calm">
+    <span class="label">Alles erledigt</span>
+    <h2>Nichts mehr offen. Feierabend.</h2>
+    <p class="meta">${dailySolved() ? 'Tagesrätsel gelöst, Sticker ist im Album.' : 'Neue Aufgaben kommen automatisch aus WebUntis und itslearning.'}</p>
+  </section>`;
+}
+
 function viewToday() {
   const today = todayISO();
   const now = new Date();
   const t = targetDay();
   const lessons = lessonsOn(t.date);
   const rec = S.days[today] || {};
-  const st = streakInfo();
-  const lv = levelInfo();
 
   if (S.ranzen.date !== t.date) S.ranzen = { date: t.date, checked: [] };
   const items = ranzenItems(t.date);
@@ -385,58 +539,61 @@ function viewToday() {
   const open = S.homework.filter(h => !h.doneAt).sort((a, b) => a.due.localeCompare(b.due));
   const shownHw = open.filter(h => diffDays(today, h.due) <= 7);
   const events = S.events.filter(e => e.date >= today && diffDays(today, e.date) <= 14).sort((a, b) => a.date.localeCompare(b.date));
+  const horizon = nextSchoolDay(today);
+  const openSoon = open.filter(h => h.due <= horizon).length;
+  const tLower = t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label;
 
   const greet = now.getHours() < 11 ? 'Moin' : now.getHours() < 17 ? 'Hey' : 'Guten Abend';
-  const briefing = briefingText();
 
   return `
   <div class="stack">
     <div class="hello">
       <div>
-        <h1>${greet} ${esc(S.settings.name)}!</h1>
-        <p class="date">${WEEKDAYS[now.getDay()]}, ${now.getDate()}. ${MONTHS[now.getMonth()]}${inHoliday(today) ? ' · Ferien 🌴' : ''}</p>
-      </div>
-      <div class="row">
-        <span class="chip">🔥 Serie ${st.count}${st.count >= STREAK_BONUS_FROM ? ' · XP ×1,2' : ''}</span>
-        <span class="chip">⭐ Level ${lv.lvl}</span>
+        <span class="label">${WD_SHORT[now.getDay()]} ${now.getDate()}. ${MONTHS[now.getMonth()]}${inHoliday(today) ? ' · Ferien' : ''}</span>
+        <h1>${greet} ${esc(S.settings.name)}</h1>
       </div>
     </div>
 
-    <section class="card briefing">
-      <div class="card-head">
-        <h2>🎧 Dein Briefing</h2>
-        <span class="tag">${rec.briefing ? 'erledigt ✓' : `+${XP.briefing} XP`}</span>
+    <section class="quote-card">
+      <div class="quote-row">
+        <div class="mini-bot" aria-hidden="true">${robotSVG(S.equipped, 'q', true)}</div>
+        <div><span class="label">Spruch des Tages</span><p class="quote">${esc(quoteOfDay())}</p></div>
       </div>
-      <div class="text">${briefing.map(l => `<p>${esc(l)}</p>`).join('')}</div>
-      <div class="row">
-        <button class="btn primary" data-action="speak">${speaking ? '⏹ Stopp' : '▶️ Vorlesen'}</button>
-        ${rec.briefing ? '' : `<button class="btn" data-action="briefing-done">Gelesen ✓</button>`}
+      <div class="row briefing-row">
+        <button class="btn small" data-action="speak">${speaking ? ICON.stop + ' Stopp' : ICON.play + ' Briefing anhören'}</button>
+        ${rec.briefing ? `<span class="tag ok">Briefing ${ICON.check}</span>` : `<button class="btn small ghost" data-action="briefing-done">Gelesen · +${XP.briefing} XP</button>`}
+        <details class="brief-text"><summary>Text</summary><div class="text">${briefingText().slice(2).map(l => `<p>${esc(l)}</p>`).join('')}</div></details>
       </div>
+    </section>
+
+    ${nextCard(t, rec)}
+
+    <section class="goal-strip" aria-label="Tagesziel">
+      <div class="seg-item ${rec.ranzen ? 'done' : ''}"><span class="label">Ranzen</span><b>${rec.ranzen ? 'gepackt' : 'offen'}</b></div>
+      <div class="seg-item ${openSoon === 0 ? 'done' : ''}"><span class="label">Aufgaben</span><b>${openSoon === 0 ? 'erledigt' : openSoon + ' offen'}</b></div>
+      <div class="seg-item ${dailySolved() ? 'done' : rec.goal ? 'ready' : 'locked'}"><span class="label">Rätsel</span><b>${dailySolved() ? 'gelöst' : rec.goal ? 'frei' : 'gesperrt'}</b></div>
+      <div class="seg-item ${S.weeks[isoWeekKey(today)] ? 'done' : ''}"><span class="label">Woche</span><b>${weekGoalCount()}/${WEEK_GOAL_DAYS}</b></div>
     </section>
 
     <div class="grid-2">
       <section class="card">
-        <div class="card-head">
-          <h2>${esc(t.label)}: Stundenplan</h2>
-          <span class="tag">${fmtDate(t.date)}</span>
-        </div>
+        <div class="card-head"><h2>${esc(t.label)}</h2><span class="tag">${fmtDate(t.date)}</span></div>
         ${lessons.length ? `<div class="lessons">${lessons.map(l => `
           <div class="lesson ${l.status || ''}"><span class="nr">${l.time ? esc(l.time) : l.nr}</span><span class="subj">${subjectDot(l.subj)}<span class="nm">${esc(l.subj.name)}</span>
             ${l.status === 'cancelled' ? '<span class="flag bad">fällt aus</span>' : l.status === 'changed' ? '<span class="flag warn">geändert</span>' : ''}
             ${l.room ? `<span class="muted small">${esc(l.room)}</span>` : ''}</span>
             ${l.info ? `<span class="info">${esc(l.info)}</span>` : ''}</div>`).join('')}</div>`
-        : `<p class="empty">Noch kein Stundenplan für diesen Tag. <button class="btn small" data-go="plan">Plan eintragen</button></p>`}
+        : inHoliday(t.date) ? `<p class="empty">Ferien.</p>`
+        : syncConfigured() ? `<p class="empty">Für diesen Tag kommen noch keine Stunden aus WebUntis.</p>`
+        : `<p class="empty">Der Stundenplan kommt aus WebUntis. <button class="btn small" data-action="open-settings">Schulanbindung einrichten</button></p>`}
       </section>
 
-      <section class="card">
-        <div class="card-head">
-          <h2>🎒 Ranzen-Check für ${esc(t.label === 'Heute' ? 'heute' : t.label)}</h2>
-          <span class="tag">${rec.ranzen ? 'gepackt ✓' : `+${XP.ranzen} XP`}</span>
-        </div>
+      <section class="card" id="ranzen">
+        <div class="card-head"><h2>Ranzen für ${esc(tLower)}</h2><span class="tag ${rec.ranzen ? 'ok' : ''}">${rec.ranzen ? 'gepackt' : `+${XP.ranzen} XP`}</span></div>
         ${items.length ? `<ul class="check-list">${items.map(i => `
           <li><button class="check ${checked.has(i.txt) ? 'done' : ''}" data-action="pack" data-item="${esc(i.txt)}">
-            <span class="box">${checked.has(i.txt) ? '✓' : ''}</span>
-            <span class="label">${esc(i.txt)}</span>
+            <span class="box">${boxMark(checked.has(i.txt))}</span>
+            <span class="label-txt">${esc(i.txt)}</span>
             ${i.meta ? `<span class="meta">${esc(i.meta)}</span>` : ''}
           </button></li>`).join('')}</ul>
           ${allPacked ? '' : `<button class="btn small ghost" data-action="pack-all">Alles drin</button>`}`
@@ -445,52 +602,30 @@ function viewToday() {
     </div>
 
     <section class="card">
-      <div class="card-head">
-        <h2>📝 Hausaufgaben</h2>
-        <button class="btn small primary" data-action="hw-new">+ Neu</button>
-      </div>
-      ${shownHw.length ? `<div class="stack" style="gap:6px">${shownHw.map(hwRow).join('')}</div>`
-        : `<p class="empty">${open.length ? 'Diese Woche ist nichts fällig.' : 'Keine offenen Hausaufgaben. 🎉'}</p>`}
+      <div class="card-head"><h2>Hausaufgaben</h2><button class="btn small" data-action="hw-new">+ Neu</button></div>
+      ${shownHw.length ? `<div class="list">${shownHw.map(hwRow).join('')}</div>`
+        : `<p class="empty">${open.length ? 'Diese Woche ist nichts fällig.' : 'Keine offenen Hausaufgaben.'}</p>`}
       ${open.length > shownHw.length ? `<button class="btn small ghost" data-go="homework">Alle ${open.length} offenen ansehen</button>` : ''}
     </section>
 
     <section class="card">
-      <div class="card-head">
-        <h2>📅 Bald dran</h2>
-        <button class="btn small" data-action="ev-new">+ Termin</button>
-      </div>
-      ${events.length ? `<div class="stack" style="gap:6px">${events.map(evRow).join('')}</div>`
+      <div class="card-head"><h2>Bald dran</h2><button class="btn small" data-action="ev-new">+ Termin</button></div>
+      ${events.length ? `<div class="list">${events.map(evRow).join('')}</div>`
         : `<p class="empty">In den nächsten zwei Wochen stehen keine Arbeiten oder Tests an.</p>`}
     </section>
-
-    <section class="card">
-      <div class="card-head"><h2>🎯 Ziele</h2></div>
-      <ul class="check-list">
-        <li><div class="check ${rec.goal ? 'done' : ''}"><span class="box">${rec.goal ? '✓' : ''}</span>
-          <span class="label">Tagesziel: Ranzen gepackt und alles bis zum nächsten Schultag erledigt</span><span class="meta">+${XP.dayGoal}</span></div></li>
-        <li><div class="check ${S.weeks[isoWeekKey(today)] ? 'done' : ''}"><span class="box">${S.weeks[isoWeekKey(today)] ? '✓' : ''}</span>
-          <span class="label">Wochenziel: Tagesziel an ${WEEK_GOAL_DAYS} Tagen dieser Woche (${weekGoalCount()}/${WEEK_GOAL_DAYS})</span><span class="meta">+${XP.weekGoal}</span></div></li>
-      </ul>
-    </section>
   </div>`;
-}
-function weekGoalCount() {
-  const mon = mondayOf(todayISO());
-  let n = 0;
-  for (let i = 0; i < 7; i++) { const r = S.days[addDays(mon, i)]; if (r && r.goal) n++; }
-  return n;
 }
 
 function hwRow(h) {
   const s = subjectById(h.subjectId);
   const done = !!h.doneAt;
   return `<div class="hw ${done ? 'done' : ''}">
-    <button class="box" data-action="hw-toggle" data-id="${esc(h.id)}" aria-label="${done ? 'Als offen markieren' : 'Erledigt'}">${done ? '✓' : ''}</button>
-    <div>
+    <button class="box" data-action="hw-toggle" data-id="${esc(h.id)}" aria-label="${done ? 'Als offen markieren' : 'Erledigt'}">${boxMark(done)}</button>
+    <div class="hw-main">
       <div class="text">${esc(h.text)}</div>
-      <div class="sub">${subjectDot(s)}${esc(s ? s.name : 'Sonstiges')}${h.source ? ` · <span class="src">${h.source === 'webuntis' ? 'WebUntis' : 'itslearning'}</span>` : ''} · <span class="${done ? '' : dueClass(h.due)}">fällig ${esc(relDay(h.due))} (${fmtDate(h.due)})</span></div>
+      <div class="sub">${subjectDot(s)}${esc(s ? s.name : 'Sonstiges')}${h.source ? ` · <span class="src">${h.source === 'webuntis' ? 'WebUntis' : 'itslearning'}</span>` : ''} · <span class="${done ? '' : dueClass(h.due)}">fällig ${esc(relDay(h.due))}</span></div>
     </div>
-    <button class="icon-btn" data-action="hw-edit" data-id="${esc(h.id)}" aria-label="Bearbeiten">✎</button>
+    <button class="icon-btn" data-action="hw-edit" data-id="${esc(h.id)}" aria-label="Bearbeiten">${ICON.edit}</button>
   </div>`;
 }
 
@@ -499,13 +634,56 @@ function evRow(e) {
   const d = parse(e.date);
   return `<div class="event">
     <div class="when"><div class="d">${d.getDate()}</div><div class="m">${WD_SHORT[d.getDay()]} · ${MONTHS[d.getMonth()]}</div></div>
-    <div>
+    <div class="ev-main">
       <div class="title">${esc(e.type)}${s ? ' ' + esc(s.name) : ''}</div>
-      <div class="muted small">${s ? subjectDot(s) : ''} ${esc(e.topic || 'Kein Thema eingetragen')}</div>
+      <div class="muted small">${esc(e.topic || 'Kein Thema eingetragen')}</div>
     </div>
-    <div class="row" style="gap:4px">${e.date >= todayISO() ? countdownBadge(e.date) : ''}
-      <button class="icon-btn" data-action="ev-edit" data-id="${esc(e.id)}" aria-label="Bearbeiten">✎</button></div>
+    <div class="row tight">${e.date >= todayISO() ? countdownBadge(e.date) : ''}
+      <button class="icon-btn" data-action="ev-edit" data-id="${esc(e.id)}" aria-label="Bearbeiten">${ICON.edit}</button></div>
   </div>`;
+}
+
+/* ---------- Fokus-Timer ---------- */
+
+let focusTick = null;
+function startFocus(hwId) {
+  S.focus = { end: Date.now() + FOCUS_MIN * 60000, hwId: hwId || null };
+  save();
+  renderFocus();
+}
+function renderFocus() {
+  const el = document.getElementById('focus');
+  if (!el) return;
+  if (!S.focus) { el.hidden = true; el.innerHTML = ''; clearInterval(focusTick); focusTick = null; return; }
+  el.hidden = false;
+  const h = S.focus.hwId && S.homework.find(x => x.id === S.focus.hwId);
+  const s = h && subjectById(h.subjectId);
+  const left = Math.max(0, S.focus.end - Date.now());
+  const task = h ? `<p class="focus-task">${s ? esc(s.name) + ' · ' : ''}${esc(h.text)}</p>` : '';
+  if (left === 0) {
+    clearInterval(focusTick); focusTick = null;
+    el.innerHTML = `<div class="focus-inner">
+      <span class="label">Fokus-Zeit geschafft</span>${task}
+      <h2>Stark. Jetzt 5 Minuten Pause.</h2>
+      <div class="row center">
+        ${h && !h.doneAt ? `<button class="btn primary" data-action="focus-done">${ICON.check} Aufgabe erledigt</button>` : ''}
+        <button class="btn" data-action="focus-again">Noch eine Runde</button>
+        <button class="btn ghost" data-action="focus-stop">Schließen</button>
+      </div></div>`;
+    return;
+  }
+  const total = FOCUS_MIN * 60000;
+  const C = 2 * Math.PI * 54;
+  const sec = Math.ceil(left / 1000);
+  el.innerHTML = `<div class="focus-inner">
+    <span class="label">Fokus-Zeit</span>${task}
+    <div class="focus-ring"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="trk" cx="60" cy="60" r="54"/>
+      <circle class="prog" cx="60" cy="60" r="54" stroke-dasharray="${(C * (1 - left / total)).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 60 60)"/></svg>
+      <b>${Math.floor(sec / 60)}:${pad(sec % 60)}</b></div>
+    <p class="muted">Eine Sache, Handy weg, bis die Zeit um ist.</p>
+    <button class="btn ghost" data-action="focus-stop">Abbrechen</button>
+  </div>`;
+  if (!focusTick) focusTick = setInterval(renderFocus, 1000);
 }
 
 /* ---------- Ansicht: Hausaufgaben ---------- */
@@ -516,20 +694,20 @@ function viewHomework() {
   const late = open.filter(h => h.due < today);
   const upcoming = open.filter(h => h.due >= today);
   const done = S.homework.filter(h => h.doneAt && diffDays(h.doneAt, today) <= 14).sort((a, b) => b.doneAt.localeCompare(a.doneAt));
-  const section = (title, list, emptyText) => `
-    <section class="card">
+  const section = (title, list, emptyText, cls = '') => `
+    <section class="card ${cls}">
       <div class="card-head"><h2>${title}</h2><span class="tag">${list.length}</span></div>
-      ${list.length ? `<div class="stack" style="gap:6px">${list.map(hwRow).join('')}</div>` : `<p class="empty">${emptyText}</p>`}
+      ${list.length ? `<div class="list">${list.map(hwRow).join('')}</div>` : `<p class="empty">${emptyText}</p>`}
     </section>`;
   return `
   <div class="stack">
     <div class="hello">
-      <div><h1>Hausaufgaben</h1><p class="muted">Erledigt +${XP.hwDone} XP, pünktlich +${XP.hwOnTime}, selbst eingetragen +${XP.hwSelf}</p></div>
-      <button class="btn primary" data-action="hw-new">+ Neue Hausaufgabe</button>
+      <div><span class="label">Erledigt +${XP.hwDone} · pünktlich +${XP.hwOnTime} · selbst eingetragen +${XP.hwSelf}</span><h1>Aufgaben</h1></div>
+      <button class="btn primary" data-action="hw-new">+ Neue Aufgabe</button>
     </div>
-    ${late.length ? section('⚠️ Überfällig', late, '') : ''}
-    ${section('Offen', upcoming, 'Alles erledigt. 🎉')}
-    ${section('Erledigt (letzte 14 Tage)', done, 'Noch nichts abgehakt.')}
+    ${late.length ? section('Überfällig', late, '', 'alert') : ''}
+    ${section('Offen', upcoming, 'Alles erledigt.')}
+    ${section('Erledigt in den letzten 14 Tagen', done, 'Noch nichts abgehakt.')}
   </div>`;
 }
 
@@ -549,7 +727,7 @@ function openHomeworkDialog(id) {
   const due = h ? h.due : nextSchoolDay(todayISO());
   showDialog(`
     <form method="dialog" id="hw-form">
-      <h2>${h ? 'Hausaufgabe bearbeiten' : 'Neue Hausaufgabe'}</h2>
+      <h2>${h ? 'Aufgabe bearbeiten' : 'Neue Aufgabe'}</h2>
       <label class="field">Fach
         <select name="subject">${subjectOptions(defaultSubj)}</select>
       </label>
@@ -606,7 +784,7 @@ function toggleHomework(id) {
   let g = award(XP.hwDone, 'Hausaufgabe erledigt', 'hw:' + h.id);
   if (today <= h.due) g += award(XP.hwOnTime, 'Pünktlich erledigt', 'hwt:' + h.id);
   if (h.self) g += award(XP.hwSelf, 'Selbst eingetragen', 'hws:' + h.id);
-  afterAction(g, 'Hausaufgabe erledigt');
+  afterAction(g, 'Aufgabe erledigt');
 }
 
 /* ---------- Ansicht: Termine (Pauls eigener Schulkalender) ---------- */
@@ -618,19 +796,19 @@ function viewEvents() {
   return `
   <div class="stack">
     <div class="hello">
-      <div><h1>Meine Termine</h1><p class="muted">Klassenarbeiten, Tests und Abgaben, die du selbst einträgst.</p></div>
+      <div><span class="label">Klassenarbeiten, Tests, Abgaben</span><h1>Termine</h1></div>
       <button class="btn primary" data-action="ev-new">+ Termin eintragen</button>
     </div>
     <section class="card">
       <div class="card-head"><h2>Kommt noch</h2><span class="tag">${upcoming.length}</span></div>
-      ${upcoming.length ? `<div class="stack" style="gap:6px">${upcoming.map(evRow).join('')}</div>`
+      ${upcoming.length ? `<div class="list">${upcoming.map(evRow).join('')}</div>`
         : `<p class="empty">Keine Termine eingetragen. Sobald eine Arbeit angekündigt wird: hier eintragen.</p>`}
     </section>
     ${past.length ? `<section class="card">
       <div class="card-head"><h2>Vorbei</h2></div>
-      <div class="stack" style="gap:6px">${past.map(evRow).join('')}</div>
+      <div class="list">${past.map(evRow).join('')}</div>
     </section>` : ''}
-    <p class="muted small">Später (Phase 2) kommen Termine aus WebUntis und itslearning automatisch dazu. Ab Phase 3 baut die App aus jedem Termin einen Lernplan.</p>
+    <p class="muted small">WebUntis gibt Prüfungstermine für Schülerkonten nicht heraus. Deshalb trägst du sie hier selbst ein. Am Tag davor erinnert dich der Spruch des Tages.</p>
   </div>`;
 }
 
@@ -676,8 +854,8 @@ function syncedWeek() {
   const kw = isoWeekKey(mon).split('-W')[1];
   return `<section class="card">
     <div class="card-head">
-      <h2>Woche ${Number(kw)} · ${fmtDate(days[0], false)} bis ${fmtDate(days[4], false)}</h2>
-      <div class="row" style="gap:6px">
+      <h2>KW ${Number(kw)} · ${fmtDate(days[0], false)} bis ${fmtDate(days[4], false)}</h2>
+      <div class="row tight">
         <button class="btn small" data-action="plan-week" data-dir="-1" ${planWeekOffset <= -1 ? 'disabled' : ''} aria-label="Woche zurück">‹</button>
         <button class="btn small" data-action="plan-week" data-dir="0" ${planWeekOffset === 0 ? 'disabled' : ''}>Aktuell</button>
         <button class="btn small" data-action="plan-week" data-dir="1" ${planWeekOffset >= 1 ? 'disabled' : ''} aria-label="Woche vor">›</button>
@@ -686,11 +864,11 @@ function syncedWeek() {
     <div class="week-plan-wrap"><div class="week-plan">${days.map(day => {
       const ls = lessonsOn(day);
       return `<div class="wp-day ${day === today ? 'today' : ''}">
-        <h3>${WD_SHORT[parse(day).getDay()]}, ${parse(day).getDate()}.${day === today ? ' · heute' : ''}</h3>
+        <h3>${WD_SHORT[parse(day).getDay()]} ${parse(day).getDate()}.${day === today ? ' · heute' : ''}</h3>
         ${ls.length ? `<div class="lessons">${ls.map(l => `
           <div class="lesson ${l.status || ''}"><span class="nr">${esc(l.time || String(l.nr))}</span><span class="subj">${subjectDot(l.subj)}<span class="nm">${esc(l.subj.name)}</span></span>
             ${l.status === 'cancelled' ? '<span class="info bad">fällt aus</span>' : ''}${l.info && l.status !== 'cancelled' ? `<span class="info">${esc(l.info)}</span>` : ''}</div>`).join('')}</div>`
-        : `<p class="empty small">${inHoliday(day) ? 'Ferien 🌴' : 'Keine Daten'}</p>`}
+        : `<p class="empty small">${inHoliday(day) ? 'Ferien' : 'Keine Daten'}</p>`}
       </div>`;
     }).join('')}</div></div>
     <p class="muted small">${esc(syncStatusText().replace(/ · Probleme.*$/, ''))} · aus WebUntis</p>
@@ -699,42 +877,27 @@ function syncedWeek() {
 
 function viewPlan() {
   const synced = !!(S.sync && S.sync.lessons && S.sync.lessons.length);
-  const periods = S.settings.periods;
-  const days = [1, 2, 3, 4, 5];
   return `
   <div class="stack">
-    <div class="hello"><div><h1>Stundenplan</h1><p class="muted">${synced ? 'Kommt automatisch aus WebUntis, mit Ausfällen und Vertretungen.' : 'Einmal eintragen, dann weiß die App jeden Tag, was in den Ranzen muss.'}</p></div></div>
-    ${synced ? syncedWeek() : ''}
-    <section class="card">
-      <div class="card-head">
-        <h2>${synced ? 'Eigener Plan (nur Ersatz, wenn keine Schuldaten da sind)' : 'Woche'}</h2>
-        <label class="row small muted">Stunden
-          <select data-action="periods" class="btn small">${[5, 6, 7, 8, 9, 10].map(n => `<option ${n === periods ? 'selected' : ''}>${n}</option>`).join('')}</select>
-        </label>
-      </div>
-      <div class="tt-wrap"><table class="tt">
-        <thead><tr><th></th>${days.map(d => `<th>${WD_SHORT[d]}</th>`).join('')}</tr></thead>
-        <tbody>${Array.from({ length: periods }, (_, i) => `<tr><td>${i + 1}</td>${days.map(d => `
-          <td><select data-action="tt" data-day="${d}" data-p="${i}" aria-label="${WEEKDAYS[d]} ${i + 1}. Stunde">
-            <option value="">–</option>${S.subjects.map(s => `<option value="${esc(s.id)}" ${(S.timetable[d] || [])[i] === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
-          </select></td>`).join('')}</tr>`).join('')}
-        </tbody>
-      </table></div>
-    </section>
+    <div class="hello"><div><span class="label">Aus WebUntis, mit Ausfällen und Vertretungen</span><h1>Stundenplan</h1></div></div>
+    ${synced ? syncedWeek() : `<section class="card">
+      <p>${syncConfigured() ? 'Noch keine Stundenplan-Daten da. Einmal abrufen hilft meistens.' : 'Der Stundenplan kommt automatisch aus WebUntis. Dafür einmal die Schulanbindung einrichten.'}</p>
+      <div class="row">${syncConfigured() ? `<button class="btn primary" data-action="sync">Jetzt abrufen</button>` : `<button class="btn primary" data-action="open-settings">Schulanbindung einrichten</button>`}</div>
+    </section>`}
 
     <section class="card">
-      <div class="card-head"><h2>Fächer und was in den Ranzen gehört</h2><button class="btn small primary" data-action="subj-new">+ Fach</button></div>
-      <div class="stack" style="gap:6px">${S.subjects.map(s => `
+      <div class="card-head"><h2>Fächer und was in den Ranzen gehört</h2><button class="btn small" data-action="subj-new">+ Fach</button></div>
+      <div class="list">${S.subjects.map(s => `
         <div class="subject-row">
           <span class="sw" style="background:${esc(s.color)}"></span>
           <div><div><b>${esc(s.name)}</b></div><div class="items">${esc((s.items || []).join(', ') || 'keine Sachen eingetragen')}</div></div>
-          <button class="icon-btn" data-action="subj-edit" data-id="${esc(s.id)}" aria-label="${esc(s.name)} bearbeiten">✎</button>
+          <button class="icon-btn" data-action="subj-edit" data-id="${esc(s.id)}" aria-label="${esc(s.name)} bearbeiten">${ICON.edit}</button>
         </div>`).join('')}
       </div>
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>Kommt immer mit</h2><button class="icon-btn" data-action="base-edit" aria-label="Bearbeiten">✎</button></div>
+      <div class="card-head"><h2>Kommt immer mit</h2><button class="icon-btn" data-action="base-edit" aria-label="Bearbeiten">${ICON.edit}</button></div>
       <p>${esc(S.settings.baseItems.join(', ') || 'Nichts eingetragen')}</p>
     </section>
   </div>`;
@@ -794,53 +957,143 @@ function openBaseItemsDialog() {
   });
 }
 
-/* ---------- Roboter-Avatar ---------- */
+/* ---------- Werkstatt: Roboter und App anpassen ---------- */
 
 const COSMETICS = [
+  // Farbe des Roboters
   { id: 'c-cyan', cat: 'color', name: 'Cyan', lvl: 1, v: '#22d3ee' },
-  { id: 'a-basic', cat: 'antenna', name: 'Standard-Antenne', lvl: 1 },
-  { id: 'e-basic', cat: 'eyes', name: 'Standard-Augen', lvl: 1 },
-  { id: 'x-none', cat: 'extra', name: 'Kein Extra', lvl: 1 },
   { id: 'c-orange', cat: 'color', name: 'Orange', lvl: 2, v: '#fb923c' },
-  { id: 'a-bolt', cat: 'antenna', name: 'Blitz-Antenne', lvl: 3 },
-  { id: 'e-visor', cat: 'eyes', name: 'Visier', lvl: 4 },
+  { id: 'c-mint', cat: 'color', name: 'Mint', lvl: 3, v: '#4fe3c1' },
   { id: 'c-violet', cat: 'color', name: 'Lila', lvl: 5, v: '#a78bfa' },
-  { id: 'x-jet', cat: 'extra', name: 'Jetpack', lvl: 6 },
-  { id: 'a-dish', cat: 'antenna', name: 'Satellitenschüssel', lvl: 7 },
-  { id: 'e-laser', cat: 'eyes', name: 'Laseraugen', lvl: 8 },
+  { id: 'c-red', cat: 'color', name: 'Signalrot', lvl: 6, v: '#f05252' },
+  { id: 'c-polar', cat: 'color', name: 'Polarweiß', lvl: 8, v: '#e2e8f0' },
   { id: 'c-gold', cat: 'color', name: 'Gold', lvl: 9, v: '#facc15' },
-  { id: 'x-cape', cat: 'extra', name: 'Umhang', lvl: 10 },
+  { id: 'c-neon', cat: 'color', name: 'Neongrün', lvl: 11, v: '#a3e635' },
   { id: 'c-carbon', cat: 'color', name: 'Carbon', lvl: 12, v: '#475569' },
-  { id: 'x-wings', cat: 'extra', name: 'Flügel', lvl: 15 }
+  { id: 'c-chrome', cat: 'color', name: 'Chrom', lvl: 14, v: '#b8c4d6' },
+  { id: 'c-stealth', cat: 'color', name: 'Tarnkappe', lvl: 16, v: '#2a3150' },
+  { id: 'c-holo', cat: 'color', name: 'Hologramm', lvl: 20, v: 'holo' },
+  // Antenne
+  { id: 'a-basic', cat: 'antenna', name: 'Standard', lvl: 1 },
+  { id: 'a-bolt', cat: 'antenna', name: 'Blitz', lvl: 3 },
+  { id: 'a-double', cat: 'antenna', name: 'Doppelt', lvl: 5 },
+  { id: 'a-dish', cat: 'antenna', name: 'Satellitenschüssel', lvl: 7 },
+  { id: 'a-radar', cat: 'antenna', name: 'Radar', lvl: 10 },
+  { id: 'a-mast', cat: 'antenna', name: 'Funkmast', lvl: 13 },
+  // Augen
+  { id: 'e-basic', cat: 'eyes', name: 'Standard', lvl: 1 },
+  { id: 'e-visor', cat: 'eyes', name: 'Visier', lvl: 4 },
+  { id: 'e-pixel', cat: 'eyes', name: 'Pixel', lvl: 6 },
+  { id: 'e-laser', cat: 'eyes', name: 'Laser', lvl: 8 },
+  { id: 'e-scan', cat: 'eyes', name: 'Scanner', lvl: 11 },
+  { id: 'e-cross', cat: 'eyes', name: 'Zielkreuz', lvl: 15 },
+  // Extra
+  { id: 'x-none', cat: 'extra', name: 'Ohne', lvl: 1 },
+  { id: 'x-jet', cat: 'extra', name: 'Jetpack', lvl: 6 },
+  { id: 'x-cape', cat: 'extra', name: 'Umhang', lvl: 10 },
+  { id: 'x-reactor', cat: 'extra', name: 'Reaktor-Kern', lvl: 12 },
+  { id: 'x-wings', cat: 'extra', name: 'Flügel', lvl: 15 },
+  { id: 'x-ring', cat: 'extra', name: 'Antigrav-Ring', lvl: 18 },
+  // Begleiter
+  { id: 'b-none', cat: 'buddy', name: 'Ohne', lvl: 1 },
+  { id: 'b-drone', cat: 'buddy', name: 'Mini-Drohne', lvl: 2 },
+  { id: 'b-sat', cat: 'buddy', name: 'Satellit', lvl: 7 },
+  { id: 'b-rover', cat: 'buddy', name: 'Rover', lvl: 12 },
+  { id: 'b-orb', cat: 'buddy', name: 'Energie-Kugel', lvl: 17 },
+  // Raum hinter dem Roboter
+  { id: 'r-none', cat: 'room', name: 'Dunkel', lvl: 1 },
+  { id: 'r-stars', cat: 'room', name: 'Sternfeld', lvl: 3 },
+  { id: 'r-nebula', cat: 'room', name: 'Nebel', lvl: 6 },
+  { id: 'r-grid', cat: 'room', name: 'Werkstatt', lvl: 9 },
+  { id: 'r-moon', cat: 'room', name: 'Mondoberfläche', lvl: 13 },
+  { id: 'r-warp', cat: 'room', name: 'Hyperraum', lvl: 19 },
+  // Farbe der ganzen App
+  { id: 't-amber', cat: 'theme', name: 'Bernstein', lvl: 1, v: '#ffb547' },
+  { id: 't-mint', cat: 'theme', name: 'Mint', lvl: 2, v: '#4fe3c1' },
+  { id: 't-cyan', cat: 'theme', name: 'Eis', lvl: 4, v: '#38bdf8' },
+  { id: 't-magenta', cat: 'theme', name: 'Magenta', lvl: 7, v: '#f472b6' },
+  { id: 't-red', cat: 'theme', name: 'Signalrot', lvl: 10, v: '#ff6b6b' },
+  { id: 't-violet', cat: 'theme', name: 'Ultraviolett', lvl: 14, v: '#a5b4fc' },
+  { id: 't-lime', cat: 'theme', name: 'Neon', lvl: 17, v: '#a3e635' },
+  { id: 't-white', cat: 'theme', name: 'Weißlicht', lvl: 20, v: '#f1f5f9' },
+  // Titel
+  { id: 'ti-rekrut', cat: 'title', name: 'Rekrut', lvl: 1 },
+  { id: 'ti-kadett', cat: 'title', name: 'Kadett', lvl: 3 },
+  { id: 'ti-navigator', cat: 'title', name: 'Navigator', lvl: 5 },
+  { id: 'ti-pilot', cat: 'title', name: 'Pilot', lvl: 8 },
+  { id: 'ti-ingenieur', cat: 'title', name: 'Ingenieur', lvl: 11 },
+  { id: 'ti-kommandant', cat: 'title', name: 'Kommandant', lvl: 15 },
+  { id: 'ti-admiral', cat: 'title', name: 'Admiral', lvl: 20 }
 ];
-const CAT_NAMES = { color: 'Farbe', antenna: 'Antenne', eyes: 'Augen', extra: 'Extra' };
+const CAT_NAMES = { color: 'Farbe', antenna: 'Antenne', eyes: 'Augen', extra: 'Extra', buddy: 'Begleiter', room: 'Raum', theme: 'App-Farbe', title: 'Titel' };
+const cosmetic = id => COSMETICS.find(c => c.id === id);
+const equippedOf = cat => cosmetic(S.equipped[cat]) || COSMETICS.find(c => c.cat === cat);
 
-function robotSVG(eq = S.equipped) {
-  const col = (COSMETICS.find(c => c.id === eq.color) || COSMETICS[0]).v;
+function robotSVG(eq = S.equipped, idp = 'r', headOnly = false) {
+  const colItem = cosmetic(eq.color) || COSMETICS[0];
+  const col = colItem.v === 'holo' ? `url(#${idp}-holo)` : colItem.v;
   const dark = '#0b1120';
-  const extra = {
+  const steel = '#9aa4c4';
+  const glow = '#4fe3c1';
+  const stars = [[18, 22], [44, 62], [172, 28], [152, 72], [28, 140], [184, 120], [122, 12], [70, 30], [162, 168], [16, 184], [96, 192], [188, 60]]
+    .map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="${i % 3 ? 1.1 : 1.7}" fill="#fff" opacity="${i % 2 ? 0.45 : 0.8}"/>`).join('');
+  const room = {
+    'r-stars': stars,
+    'r-nebula': `<rect width="200" height="200" fill="url(#${idp}-neb)"/>${stars}`,
+    'r-grid': Array.from({ length: 9 }, (_, i) => `<line x1="${i * 25}" y1="0" x2="${i * 25}" y2="200" stroke="#fff" stroke-opacity=".06"/><line x1="0" y1="${i * 25}" x2="200" y2="${i * 25}" stroke="#fff" stroke-opacity=".06"/>`).join(''),
+    'r-moon': `${stars}<ellipse cx="100" cy="222" rx="160" ry="48" fill="#2b3150"/><ellipse cx="44" cy="188" rx="12" ry="4" fill="#20253f"/><ellipse cx="150" cy="194" rx="16" ry="5" fill="#20253f"/>`,
+    'r-warp': Array.from({ length: 24 }, (_, i) => { const a = i * Math.PI / 12; return `<line x1="${(100 + Math.cos(a) * 70).toFixed(1)}" y1="${(100 + Math.sin(a) * 70).toFixed(1)}" x2="${(100 + Math.cos(a) * 150).toFixed(1)}" y2="${(100 + Math.sin(a) * 150).toFixed(1)}" stroke="#a5b4fc" stroke-opacity="${i % 2 ? 0.25 : 0.5}" stroke-width="2"/>`; }).join('')
+  }[eq.room] || '';
+  const back = {
     'x-jet': `<rect x="40" y="96" width="22" height="56" rx="8" fill="#64748b"/><rect x="138" y="96" width="22" height="56" rx="8" fill="#64748b"/>
       <path d="M44 152 l7 22 l7 -22z" fill="#fb923c"/><path d="M142 152 l7 22 l7 -22z" fill="#fb923c"/>`,
-    'x-cape': `<path d="M58 96 L142 96 L160 178 L40 178 Z" fill="#dc2626"/>`,
+    'x-cape': `<path d="M58 96 L142 96 L160 178 L40 178 Z" fill="#b91c1c"/>`,
     'x-wings': `<path d="M60 110 C20 90 10 130 30 150 C40 140 50 135 62 135Z" fill="#e2e8f0"/><path d="M140 110 C180 90 190 130 170 150 C160 140 150 135 138 135Z" fill="#e2e8f0"/>`
   }[eq.extra] || '';
+  const front = {
+    'x-reactor': `<circle cx="100" cy="122" r="17" fill="none" stroke="${glow}" stroke-width="3" opacity=".85"/><circle cx="100" cy="122" r="22" fill="none" stroke="${glow}" stroke-width="1.5" opacity=".4"/>`,
+    'x-ring': `<ellipse cx="100" cy="192" rx="46" ry="7" fill="none" stroke="#a5b4fc" stroke-width="3" opacity=".9"/><ellipse cx="100" cy="192" rx="56" ry="9" fill="none" stroke="#a5b4fc" stroke-width="1.5" opacity=".4"/>`
+  }[eq.extra] || '';
   const antenna = {
-    'a-basic': `<line x1="100" y1="26" x2="100" y2="12" stroke="${dark}" stroke-width="4"/><circle cx="100" cy="10" r="6" fill="${col}" stroke="${dark}" stroke-width="3"/>`,
+    'a-basic': `<line x1="100" y1="26" x2="100" y2="13" stroke="${steel}" stroke-width="4"/><circle cx="100" cy="10" r="6" fill="${col}" stroke="${dark}" stroke-width="3"/>`,
     'a-bolt': `<path d="M104 4 L92 18 L101 18 L95 30 L110 14 L101 14 Z" fill="#facc15" stroke="${dark}" stroke-width="2"/>`,
-    'a-dish': `<line x1="100" y1="26" x2="100" y2="16" stroke="${dark}" stroke-width="4"/><path d="M84 6 Q100 26 116 6 Z" fill="#cbd5e1" stroke="${dark}" stroke-width="3"/>`
+    'a-double': `<line x1="82" y1="28" x2="76" y2="12" stroke="${steel}" stroke-width="3.5"/><line x1="118" y1="28" x2="124" y2="12" stroke="${steel}" stroke-width="3.5"/><circle cx="75" cy="10" r="4.5" fill="${glow}"/><circle cx="125" cy="10" r="4.5" fill="${glow}"/>`,
+    'a-dish': `<line x1="100" y1="26" x2="100" y2="16" stroke="${steel}" stroke-width="4"/><path d="M84 6 Q100 26 116 6 Z" fill="#cbd5e1" stroke="${dark}" stroke-width="3"/>`,
+    'a-radar': `<line x1="100" y1="26" x2="100" y2="14" stroke="${steel}" stroke-width="4"/><path d="M86 12 A14 14 0 0 1 114 12" fill="none" stroke="${glow}" stroke-width="4" stroke-linecap="round"/><path d="M92 7 A8 8 0 0 1 108 7" fill="none" stroke="${glow}" stroke-width="3" stroke-linecap="round" opacity=".6"/>`,
+    'a-mast': `<line x1="100" y1="26" x2="100" y2="3" stroke="${steel}" stroke-width="3"/><line x1="92" y1="11" x2="108" y2="11" stroke="${steel}" stroke-width="2.5"/><line x1="95" y1="18" x2="105" y2="18" stroke="${steel}" stroke-width="2.5"/><circle cx="100" cy="3" r="3.5" fill="#ff6b6b"/>`
   }[eq.antenna] || '';
   const eyes = {
     'e-basic': `<circle cx="82" cy="54" r="9" fill="#e0f2fe"/><circle cx="118" cy="54" r="9" fill="#e0f2fe"/><circle cx="84" cy="54" r="4" fill="${dark}"/><circle cx="120" cy="54" r="4" fill="${dark}"/>`,
     'e-visor': `<rect x="66" y="44" width="68" height="20" rx="10" fill="#22d3ee"/><rect x="72" y="48" width="22" height="5" rx="2.5" fill="#e0f2fe" opacity=".8"/>`,
-    'e-laser': `<circle cx="82" cy="54" r="9" fill="#f87171"/><circle cx="118" cy="54" r="9" fill="#f87171"/><circle cx="82" cy="54" r="4" fill="#fee2e2"/><circle cx="118" cy="54" r="4" fill="#fee2e2"/>`
+    'e-pixel': `<rect x="74" y="47" width="14" height="14" fill="${glow}"/><rect x="112" y="47" width="14" height="14" fill="${glow}"/><rect x="74" y="47" width="5" height="5" fill="#e0fff7"/><rect x="112" y="47" width="5" height="5" fill="#e0fff7"/>`,
+    'e-laser': `<circle cx="82" cy="54" r="9" fill="#f87171"/><circle cx="118" cy="54" r="9" fill="#f87171"/><circle cx="82" cy="54" r="4" fill="#fee2e2"/><circle cx="118" cy="54" r="4" fill="#fee2e2"/>`,
+    'e-scan': `<rect x="68" y="49" width="64" height="10" rx="5" fill="#ff6b6b" opacity=".35"/><rect x="70" y="52" width="60" height="4" rx="2" fill="#ff8a8a"/>`,
+    'e-cross': ['82', '118'].map(x => `<circle cx="${x}" cy="54" r="8" fill="none" stroke="#ffb547" stroke-width="2"/><line x1="${x - 11}" y1="54" x2="${+x + 11}" y2="54" stroke="#ffb547" stroke-width="1.5"/><line x1="${x}" y1="43" x2="${x}" y2="65" stroke="#ffb547" stroke-width="1.5"/>`).join('')
   }[eq.eyes] || '';
-  return `<svg viewBox="0 0 200 200" role="img" aria-label="Dein Roboter">
-    ${extra}
-    ${antenna}
+  const buddy = {
+    'b-drone': `<g transform="translate(168 40)"><line x1="-14" y1="-8" x2="14" y2="-8" stroke="${steel}" stroke-width="2"/><ellipse cx="-14" cy="-10" rx="8" ry="2" fill="${steel}"/><ellipse cx="14" cy="-10" rx="8" ry="2" fill="${steel}"/><rect x="-9" y="-6" width="18" height="12" rx="5" fill="${glow}"/><circle cx="0" cy="0" r="2.5" fill="${dark}"/></g>`,
+    'b-sat': `<g transform="translate(166 40) rotate(-20)"><rect x="-6" y="-6" width="12" height="12" rx="2" fill="#cbd5e1"/><rect x="-25" y="-4" width="16" height="8" fill="#38bdf8"/><rect x="9" y="-4" width="16" height="8" fill="#38bdf8"/><line x1="0" y1="-6" x2="0" y2="-12" stroke="${steel}" stroke-width="2"/></g>`,
+    'b-rover': `<g transform="translate(172 178)"><rect x="-14" y="-10" width="28" height="12" rx="4" fill="#ffb547"/><circle cx="-9" cy="4" r="5" fill="#334155"/><circle cx="9" cy="4" r="5" fill="#334155"/><line x1="6" y1="-10" x2="10" y2="-20" stroke="${steel}" stroke-width="2"/><circle cx="10" cy="-21" r="3" fill="${glow}"/></g>`,
+    'b-orb': `<g transform="translate(166 44)"><circle r="13" fill="#a78bfa" opacity=".22"/><circle r="8" fill="#c4b5fd"/><circle r="3" cx="-2.5" cy="-2.5" fill="#fff" opacity=".85"/></g>`
+  }[eq.buddy] || '';
+  const defs = `<defs>
+    <linearGradient id="${idp}-holo" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4fe3c1"/><stop offset=".5" stop-color="#a78bfa"/><stop offset="1" stop-color="#f472b6"/></linearGradient>
+    <radialGradient id="${idp}-neb" cx=".72" cy=".28" r=".85"><stop offset="0" stop-color="#7c3aed" stop-opacity=".55"/><stop offset=".55" stop-color="#312e81" stop-opacity=".35"/><stop offset="1" stop-color="#0b0e2a" stop-opacity="0"/></radialGradient>
+    <clipPath id="${idp}-clip"><rect width="200" height="200" rx="28"/></clipPath>
+  </defs>`;
+  const head = `${antenna}
     <rect x="56" y="26" width="88" height="62" rx="20" fill="${col}" stroke="${dark}" stroke-width="4"/>
     <rect x="66" y="38" width="68" height="34" rx="12" fill="${dark}"/>
     ${eyes}
-    <rect x="86" y="76" width="28" height="5" rx="2.5" fill="${dark}" opacity=".6"/>
+    <rect x="86" y="76" width="28" height="5" rx="2.5" fill="${dark}" opacity=".6"/>`;
+  if (headOnly) {
+    return `<svg viewBox="50 0 100 92" role="img" aria-label="Dein Roboter">${defs}${head}</svg>`;
+  }
+  return `<svg viewBox="0 0 200 200" role="img" aria-label="Dein Roboter">
+    ${defs}
+    <g clip-path="url(#${idp}-clip)"><rect width="200" height="200" fill="#0d1130"/>${room}</g>
+    ${back}
+    ${head}
     <rect x="90" y="88" width="20" height="10" fill="${dark}"/>
     <rect x="60" y="96" width="80" height="64" rx="18" fill="${col}" stroke="${dark}" stroke-width="4"/>
     <circle cx="100" cy="122" r="12" fill="${dark}"/><circle cx="100" cy="122" r="6" fill="#34d399"/>
@@ -848,102 +1101,201 @@ function robotSVG(eq = S.equipped) {
     <rect x="144" y="104" width="18" height="40" rx="9" fill="${col}" stroke="${dark}" stroke-width="4"/>
     <rect x="72" y="160" width="20" height="24" rx="6" fill="${col}" stroke="${dark}" stroke-width="4"/>
     <rect x="108" y="160" width="20" height="24" rx="6" fill="${col}" stroke="${dark}" stroke-width="4"/>
+    ${front}
+    ${buddy}
   </svg>`;
 }
 
-/* ---------- Ansicht: Ich (Fortschritt + Einstellungen) ---------- */
+function applyTheme() {
+  const th = equippedOf('theme');
+  document.documentElement.style.setProperty('--accent', th.v);
+}
+
+/* ---------- Ansicht: Ich ---------- */
+
+let meTab = 'profil';
+let shopCat = 'color';
+let albumOffset = 0;
 
 function viewMe() {
+  const tabs = [['profil', 'Profil'], ['werkstatt', 'Werkstatt'], ['spiele', 'Rätsel'], ['settings', 'Einstellungen']];
+  const body = { profil: meProfile, werkstatt: meShop, spiele: meGames, settings: meSettings }[meTab] || meProfile;
+  return `
+  <div class="stack">
+    <div class="seg" role="tablist">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${meTab === k}" class="${meTab === k ? 'on' : ''}" data-action="me-tab" data-tab="${k}">${l}</button>`).join('')}</div>
+    ${body()}
+  </div>`;
+}
+
+function nextUnlocks(lvl) {
+  const all = [...COSMETICS.map(c => ({ lvl: c.lvl, name: c.name + ' (' + CAT_NAMES[c.cat] + ')' })), ...GAMES.map(g => ({ lvl: g.lvl, name: g.name }))];
+  const nextLvl = Math.min(...all.filter(x => x.lvl > lvl).map(x => x.lvl));
+  return isFinite(nextLvl) ? { lvl: nextLvl, names: all.filter(x => x.lvl === nextLvl).map(x => x.name) } : null;
+}
+
+function meProfile() {
   const lv = levelInfo();
   const st = streakInfo();
   const today = todayISO();
   const mon = mondayOf(today);
   const week = [0, 1, 2, 3, 4].map(i => addDays(mon, i));
-  const next = COSMETICS.filter(c => c.lvl > lv.lvl).sort((a, b) => a.lvl - b.lvl)[0];
+  const next = nextUnlocks(lv.lvl);
+  const earned = BADGES.filter(b => S.badges[b.id]).length;
   return `
-  <div class="stack">
-    <div class="grid-2">
-      <section class="card">
-        <div class="avatar-wrap">${robotSVG()}</div>
-        <div class="card-head"><h2>Level ${lv.lvl}</h2><span class="tag">${S.xp} XP gesamt</span></div>
+    <section class="card profile">
+      <div class="avatar">${robotSVG(S.equipped, 'p')}</div>
+      <div class="profile-info">
+        <span class="label">${esc(equippedOf('title').name)}</span>
+        <h1>${esc(S.settings.name)}</h1>
+        <div class="lvl-row"><b>Level ${lv.lvl}</b><span class="muted">${S.xp} XP</span></div>
         <div class="bar"><span style="width:${lv.pct}%"></span></div>
-        <p class="muted small">Noch ${lv.to - S.xp} XP bis Level ${lv.lvl + 1}${next ? ` · dann wartet: ${esc(next.name)} (ab Level ${next.lvl})` : ''}</p>
-      </section>
-      <section class="card">
-        <div class="stats">
-          <div class="stat"><div class="v">🔥 ${st.count}</div><div class="l">Serie (Schultage)</div></div>
-          <div class="stat"><div class="v">${st.jokerUsedThisWeek ? '0' : '1'}</div><div class="l">Joker diese Woche</div></div>
-          <div class="stat"><div class="v">${st.count >= STREAK_BONUS_FROM ? '×1,2' : '×1'}</div><div class="l">XP-Bonus</div></div>
-        </div>
-        <div class="week">${week.map(d => {
-          const r = S.days[d] || {};
-          const sym = inHoliday(d) ? '🌴' : r.goal ? '🎯' : r.active ? '✅' : d < today ? '·' : '';
-          return `<div class="day ${d === today ? 'today' : ''}"><span class="s">${sym || '&nbsp;'}</span>${WD_SHORT[parse(d).getDay()]}</div>`;
-        }).join('')}</div>
-        <p class="muted small">Die Serie zählt Schultage, an denen du etwas gemacht hast. Wochenenden und Ferien unterbrechen sie nicht. Einen verpassten Tag pro Woche rettet der Joker automatisch. Ab ${STREAK_BONUS_FROM} Tagen gibt es ×1,2 auf alle XP.</p>
-      </section>
-    </div>
-
-    <section class="card">
-      <div class="card-head"><h2>🤖 Roboter anpassen</h2><span class="tag">Neues gibt es mit jedem Level</span></div>
-      ${Object.keys(CAT_NAMES).map(cat => `
-        <h3>${CAT_NAMES[cat]}</h3>
-        <div class="cosmetics">${COSMETICS.filter(c => c.cat === cat).map(c => {
-          const locked = c.lvl > lv.lvl;
-          const on = S.equipped[cat] === c.id;
-          return `<button class="cos ${on ? 'on' : ''} ${locked ? 'locked' : ''}" data-action="equip" data-id="${c.id}" ${locked ? 'disabled' : ''}>
-            <span class="n">${locked ? '🔒 ' : ''}${esc(c.name)}</span><span class="h">${locked ? 'ab Level ' + c.lvl : on ? 'ausgerüstet' : 'antippen'}</span></button>`;
-        }).join('')}</div>`).join('')}
+        <p class="muted small">Noch ${lv.to - S.xp} XP bis Level ${lv.lvl + 1}${next && next.lvl === lv.lvl + 1 ? ' · dann neu: ' + esc(next.names.join(', ')) : ''}</p>
+        <button class="btn small" data-action="me-tab" data-tab="werkstatt">Roboter anpassen</button>
+      </div>
     </section>
 
-    <div class="grid-2">
-      <section class="card">
-        <div class="card-head"><h2>So gibt es XP</h2></div>
-        <table class="xp-table"><tbody>
-          <tr><td>Ranzen-Check erledigt</td><td>+${XP.ranzen}</td></tr>
-          <tr><td>Briefing gelesen oder gehört</td><td>+${XP.briefing}</td></tr>
-          <tr><td>Hausaufgabe erledigt</td><td>+${XP.hwDone}</td></tr>
-          <tr><td>… pünktlich</td><td>+${XP.hwOnTime}</td></tr>
-          <tr><td>… selbst eingetragen</td><td>+${XP.hwSelf}</td></tr>
-          <tr><td>Tagesziel</td><td>+${XP.dayGoal}</td></tr>
-          <tr><td>Wochenziel</td><td>+${XP.weekGoal}</td></tr>
-        </tbody></table>
-        <p class="muted small">Es gibt nie Abzüge. XP gibt es für Gewohnheiten, nicht für Noten.</p>
-      </section>
-      <section class="card">
-        <div class="card-head"><h2>Zuletzt bekommen</h2></div>
-        <div class="log">${S.log.slice(0, 12).map(l => `<div><span>${esc(l.r)} · ${fmtDate(l.d, false)}</span><b>+${l.a}</b></div>`).join('') || '<p class="empty">Noch keine XP. Fang mit dem Ranzen-Check an!</p>'}</div>
-      </section>
-    </div>
+    <section class="card">
+      <div class="stats">
+        <div class="stat"><div class="v">${st.count}</div><div class="l">Serie</div></div>
+        <div class="stat"><div class="v">${S.bestStreak || st.count}</div><div class="l">Bestwert</div></div>
+        <div class="stat"><div class="v">${st.jokerUsedThisWeek ? '0' : '1'}</div><div class="l">Joker</div></div>
+        <div class="stat"><div class="v">${st.count >= STREAK_BONUS_FROM ? '×1,2' : '×1'}</div><div class="l">XP-Bonus</div></div>
+      </div>
+      <div class="week">${week.map(d => {
+        const r = S.days[d] || {};
+        const cls = inHoliday(d) ? 'off' : r.goal ? 'goal' : r.active ? 'active' : '';
+        return `<div class="day ${cls} ${d === today ? 'today' : ''}"><span class="pip"></span>${WD_SHORT[parse(d).getDay()]}</div>`;
+      }).join('')}</div>
+      <p class="muted small">Voll = Tagesziel, Ring = aktiv. Die Serie zählt Schultage, an denen du etwas gemacht hast. Wochenenden und Ferien unterbrechen sie nicht, einen verpassten Tag pro Woche rettet der Joker. Ab ${STREAK_BONUS_FROM} Tagen gibt es ×1,2 auf alle XP.</p>
+    </section>
 
     <section class="card">
-      <div class="card-head"><h2>⚙️ Einstellungen</h2></div>
+      <div class="card-head"><h2>Abzeichen</h2><span class="tag">${earned} von ${BADGES.length}</span></div>
+      <div class="badges">${BADGES.map(b => `<div class="badge ${S.badges[b.id] ? 'on' : ''}" title="${esc(b.desc)}">${badgeSVG(b, !!S.badges[b.id])}<b>${esc(b.name)}</b><span>${esc(b.desc)}</span></div>`).join('')}</div>
+    </section>
+
+    <details class="card fold">
+      <summary><h2>So gibt es XP</h2></summary>
+      <table class="xp-table"><tbody>
+        <tr><td>Ranzen-Check erledigt</td><td>+${XP.ranzen}</td></tr>
+        <tr><td>Briefing gelesen oder gehört</td><td>+${XP.briefing}</td></tr>
+        <tr><td>Hausaufgabe erledigt</td><td>+${XP.hwDone}</td></tr>
+        <tr><td>… pünktlich</td><td>+${XP.hwOnTime}</td></tr>
+        <tr><td>… selbst eingetragen</td><td>+${XP.hwSelf}</td></tr>
+        <tr><td>Tagesziel</td><td>+${XP.dayGoal}</td></tr>
+        <tr><td>Wochenziel</td><td>+${XP.weekGoal}</td></tr>
+      </tbody></table>
+      <p class="muted small">Es gibt nie Abzüge. XP gibt es für Gewohnheiten, nicht für Noten. Rätsel geben keine XP, dafür Sticker.</p>
+    </details>
+    <details class="card fold">
+      <summary><h2>Zuletzt bekommen</h2></summary>
+      <div class="log">${S.log.slice(0, 15).map(l => `<div><span>${esc(l.r)} · ${fmtDate(l.d, false)}</span><b>+${l.a}</b></div>`).join('') || '<p class="empty">Noch keine XP. Fang mit dem Ranzen-Check an.</p>'}</div>
+    </details>`;
+}
+
+function meShop() {
+  const lv = levelInfo().lvl;
+  const items = COSMETICS.filter(c => c.cat === shopCat);
+  const owned = COSMETICS.filter(c => c.lvl <= lv).length;
+  return `
+    <section class="card shop">
+      <div class="shop-top">
+        <div class="avatar small">${robotSVG(S.equipped, 'w')}</div>
+        <div><span class="label">${esc(equippedOf('title').name)} · Level ${lv}</span><h2>Werkstatt</h2><p class="muted small">${owned} von ${COSMETICS.length} Teilen freigeschaltet. Mit jedem Level kommt Neues dazu.</p></div>
+      </div>
+      <div class="chips" role="tablist">${Object.entries(CAT_NAMES).map(([k, n]) => `<button class="chip-btn ${shopCat === k ? 'on' : ''}" data-action="shop-cat" data-cat="${k}">${n}</button>`).join('')}</div>
+      <div class="cosmetics">${items.map(c => {
+        const locked = c.lvl > lv;
+        const on = S.equipped[c.cat] === c.id;
+        const sw = c.v ? `<span class="cos-sw" style="background:${c.v === 'holo' ? 'linear-gradient(135deg,#4fe3c1,#a78bfa,#f472b6)' : c.v}"></span>` : '';
+        return `<button class="cos ${on ? 'on' : ''} ${locked ? 'locked' : ''}" data-action="equip" data-id="${c.id}" ${locked ? 'disabled' : ''}>
+          ${sw}<span class="n">${esc(c.name)}</span><span class="h">${locked ? ICON.lock + ' Level ' + c.lvl : on ? 'aktiv' : 'antippen'}</span></button>`;
+      }).join('')}</div>
+    </section>`;
+}
+
+function albumHTML() {
+  const base = parse(todayISO().slice(0, 7) + '-01');
+  base.setMonth(base.getMonth() + albumOffset);
+  const y = base.getFullYear(), m = base.getMonth();
+  const days = new Date(y, m + 1, 0).getDate();
+  const offset = (base.getDay() + 6) % 7;
+  const today = todayISO();
+  let count = 0;
+  const cells = [];
+  for (let i = 0; i < offset; i++) cells.push('<span class="ad blank"></span>');
+  for (let d = 1; d <= days; d++) {
+    const key = `${y}-${pad(m + 1)}-${pad(d)}`;
+    const st = S.stickers[key];
+    if (st) count++;
+    cells.push(`<span class="ad ${key === today ? 'today' : ''} ${st ? 'got' : ''}">${st ? stickerSVG(st, 30) : `<i>${d}</i>`}</span>`);
+  }
+  return `<div class="card-head"><h2>Sticker-Album</h2>
+      <div class="row tight"><button class="btn small" data-action="album" data-dir="-1" aria-label="Monat zurück">‹</button>
+      <span class="tag">${MONTHS_LONG[m]} · ${count}</span>
+      <button class="btn small" data-action="album" data-dir="1" ${albumOffset >= 0 ? 'disabled' : ''} aria-label="Monat vor">›</button></div></div>
+    <div class="album">${['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map(d => `<span class="ah">${d}</span>`).join('')}${cells.join('')}</div>`;
+}
+
+function meGames() {
+  const rec = S.days[todayISO()] || {};
+  const g = dailyGame();
+  const solved = dailySolved();
+  const lv = levelInfo().lvl;
+  return `
+    <section class="card daily ${solved ? 'solved' : rec.goal ? 'ready' : 'locked'}">
+      <div class="card-head"><span class="label">Tagesrätsel</span><span class="tag ${solved ? 'ok' : ''}">${solved ? 'gelöst' : rec.goal ? 'frei' : 'gesperrt'}</span></div>
+      <div class="reward-row">${stickerSVG(g.id, 52)}<div><h2>${esc(g.name)}</h2>
+        <p class="muted small">${solved ? 'Heute schon gelöst. Der Sticker klebt im Album.' : rec.goal ? 'Tagesziel geschafft. Löse das Rätsel und hol dir den Sticker.' : 'Öffnet sich mit dem Tagesziel: Ranzen gepackt und alles bis zum nächsten Schultag erledigt.'}</p></div></div>
+      ${!solved && rec.goal ? `<div class="row"><button class="btn primary" data-action="daily-start">Rätsel starten</button></div>` : ''}
+    </section>
+    <section class="card">${albumHTML()}</section>
+    <section class="card">
+      <div class="card-head"><h2>Spielecke</h2><span class="tag">jederzeit, ohne XP</span></div>
+      <div class="list">${GAMES.map(x => {
+        const locked = x.lvl > lv;
+        return `<div class="game-row ${locked ? 'locked' : ''}">${stickerSVG(x.id, 38)}
+          <div><b>${esc(x.name)}</b><p class="muted small">${locked ? 'Ab Level ' + x.lvl : esc(x.desc)}</p></div>
+          ${locked ? `<span class="lock-ico">${ICON.lock}</span>` : `<button class="btn small" data-action="game-start" data-id="${x.id}">Spielen</button>`}</div>`;
+      }).join('')}</div>
+    </section>`;
+}
+
+function meSettings() {
+  return `
+    <section class="card">
+      <div class="card-head"><h2>Allgemein</h2></div>
       <label class="field">Name <input data-action="set-name" value="${esc(S.settings.name)}"></label>
       <label class="field">Ab wann zeigt „Heute“ schon den nächsten Schultag?
         <select data-action="set-hour">${[12, 13, 14, 15, 16, 17].map(h => `<option value="${h}" ${h === S.settings.afterSchoolHour ? 'selected' : ''}>ab ${h}:00 Uhr</option>`).join('')}</select>
       </label>
-      <div class="card-head"><h3>Ferien</h3><button class="btn small" data-action="holiday-new">+ Ferien</button></div>
-      ${S.settings.holidays.length ? `<div class="stack" style="gap:6px">${S.settings.holidays.slice().sort((a, b) => a.from.localeCompare(b.from)).map(h => `
-        <div class="subject-row"><span>🌴</span><div><b>${esc(h.label || 'Ferien')}</b><div class="items">${fmtDate(h.from)} bis ${fmtDate(h.to)}</div></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Ferien</h2><button class="btn small" data-action="holiday-new">+ Ferien</button></div>
+      ${S.settings.holidays.length ? `<div class="list">${S.settings.holidays.slice().sort((a, b) => a.from.localeCompare(b.from)).map(h => `
+        <div class="subject-row"><span class="sw holiday"></span><div><b>${esc(h.label || 'Ferien')}</b><div class="items">${fmtDate(h.from)} bis ${fmtDate(h.to)}</div></div>
         <button class="icon-btn" data-action="holiday-delete" data-id="${esc(h.id)}" aria-label="Löschen">✕</button></div>`).join('')}</div>`
         : `<p class="empty">Keine Ferien eingetragen. In den Ferien pausiert die Serie.</p>`}
-      <div class="card-head"><h3>🔌 Schulanbindung (WebUntis, itslearning)</h3></div>
-      <p class="muted small">Holt Stundenplan, Ausfälle, Hausaufgaben und Prüfungen automatisch. Die Adresse und den App-Schlüssel bekommst du beim Einrichten des Abrufdienstes.</p>
+    </section>
+    <section class="card" id="schulanbindung">
+      <div class="card-head"><h2>Schulanbindung</h2><span class="tag">WebUntis · itslearning</span></div>
+      <p class="muted small">Holt Stundenplan, Ausfälle und Hausaufgaben automatisch. Adresse und App-Schlüssel bekommst du beim Einrichten des Abrufdienstes.</p>
       <label class="field">Adresse des Abrufdienstes <input data-action="set-sync-url" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://lernbegleiter-sync.….workers.dev" value="${esc(S.settings.syncUrl)}"></label>
       <label class="field">App-Schlüssel <input data-action="set-sync-key" type="password" autocomplete="off" value="${esc(S.settings.syncKey)}"></label>
       <div class="row">
-        <button class="btn" data-action="sync" ${S.settings.syncUrl && S.settings.syncKey ? '' : 'disabled'}>${syncing ? '⏳ Lädt …' : '🔄 Jetzt abrufen'}</button>
-        <span class="muted small">${syncStatusText()}</span>
-      </div>
-      <div class="card-head"><h3>Datensicherung</h3></div>
-      <p class="muted small">Alle Daten liegen nur auf diesem Gerät. Sichere sie ab und zu, z. B. in der Dateien-App.</p>
-      <div class="row">
-        <button class="btn" data-action="export">⬇️ Sichern</button>
-        <label class="btn" style="display:inline-flex;align-items:center">⬆️ Wiederherstellen<input type="file" accept="application/json,.json" data-action="import" hidden></label>
+        <button class="btn" data-action="sync" ${syncConfigured() ? '' : 'disabled'}>${syncing ? 'Lädt …' : 'Jetzt abrufen'}</button>
+        <span class="muted small">${esc(syncStatusText())}</span>
       </div>
     </section>
-    <p class="muted small" style="text-align:center">Lernbegleiter · Phase 1 · Daten bleiben auf diesem Gerät</p>
-  </div>`;
+    <section class="card">
+      <div class="card-head"><h2>Datensicherung</h2></div>
+      <p class="muted small">Alle Daten liegen nur auf diesem Gerät. Sichere sie ab und zu, z. B. in der Dateien-App.</p>
+      <div class="row">
+        <button class="btn" data-action="export">Sichern</button>
+        <label class="btn" style="display:inline-flex;align-items:center">Wiederherstellen<input type="file" accept="application/json,.json" data-action="import" hidden></label>
+      </div>
+    </section>
+    <p class="muted small center">Lernbegleiter · Daten bleiben auf diesem Gerät</p>`;
 }
 
 function openHolidayDialog() {
@@ -980,15 +1332,14 @@ function importData(file) {
     try {
       const data = JSON.parse(String(reader.result));
       if (!data || typeof data !== 'object' || !Array.isArray(data.subjects)) throw new Error('Format');
-      if (!confirmInline('Sicherung laden? Die aktuellen Daten werden ersetzt.')) return;
-      S = Object.assign(defaultState(), data);
+      if (!window.confirm('Sicherung laden? Die aktuellen Daten werden ersetzt.')) return;
+      S = normalize(data);
       save(); render();
       toast('Sicherung geladen');
     } catch (e) { toast('Diese Datei ist keine Lernbegleiter-Sicherung'); }
   };
   reader.readAsText(file);
 }
-function confirmInline(msg) { return window.confirm(msg); }
 
 /* ---------- Schulanbindung ---------- */
 
@@ -996,7 +1347,7 @@ let syncing = false;
 const SYNC_EVERY_MS = 30 * 60 * 1000;
 
 function syncStatusText() {
-  if (!S.settings.syncUrl || !S.settings.syncKey) return 'Noch nicht eingerichtet';
+  if (!syncConfigured()) return 'Noch nicht eingerichtet';
   if (!S.sync || !S.sync.fetchedAt) return 'Noch nie abgerufen';
   const d = new Date(S.sync.fetchedAt);
   const errs = (S.sync.errors || []).map(e => e.source + (e.message ? ' (' + e.message + ')' : '')).join('; ');
@@ -1052,7 +1403,7 @@ async function syncNow(force = false, quiet = false) {
   }
 }
 function autoSync() {
-  if (!S.settings.syncUrl || !S.settings.syncKey || !navigator.onLine) return;
+  if (!syncConfigured() || !navigator.onLine) return;
   if (!S.sync || !S.sync.fetchedAt || Date.now() - S.sync.fetchedAt > SYNC_EVERY_MS) syncNow(false, true);
 }
 
@@ -1074,31 +1425,37 @@ function showDialog(html, onSubmit) {
 
 /* ---------- Routing und Ereignisse ---------- */
 
-const VIEWS = { today: viewToday, homework: viewHomework, events: viewEvents, plan: viewPlan, me: viewMe };
+const VIEWS = { today: viewToday, homework: viewHomework, events: viewEvents, plan: viewPlan, me: viewMe, game: viewGame };
 let current = (location.hash || '#today').slice(1);
-if (!VIEWS[current]) current = 'today';
+if (!VIEWS[current] || current === 'game') current = 'today';
 
 function render() {
-  document.getElementById('view').innerHTML = VIEWS[current]();
-  document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.go === current));
-  const lv = levelInfo();
+  if (current === 'game' && !G) current = 'me';
   const st = streakInfo();
-  document.getElementById('xp-pill').innerHTML = `<span class="flame">🔥 ${st.count}</span><span>Lv ${lv.lvl} · ${S.xp} XP</span>`;
+  if (st.count > (S.bestStreak || 0)) { S.bestStreak = st.count; checkBadges(); save(); }
+  applyTheme();
+  document.getElementById('view').innerHTML = VIEWS[current]();
+  const tab = current === 'game' ? 'me' : current;
+  document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.go === tab));
+  const lv = levelInfo();
+  document.getElementById('xp-pill').innerHTML = `<span class="streak"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 2c.8 3.6 5 5.4 5 10.4A5 5 0 0 1 7 12.6c0-2.6 1.6-3.8 2.2-6 1.2 1.2 1.8 2.4 2 3.6.6-2.6 1-5.4.8-8.2z" fill="currentColor"/></svg>${st.count}</span><span>LV ${lv.lvl} · ${S.xp} XP</span>`;
+  renderFocus();
 }
 function go(view) {
   if (!VIEWS[view]) return;
   current = view;
-  history.replaceState(null, '', '#' + view);
+  history.replaceState(null, '', '#' + (view === 'game' ? 'me' : view));
   render();
   window.scrollTo({ top: 0 });
 }
 
 document.addEventListener('click', ev => {
   const goEl = ev.target.closest('[data-go]');
-  if (goEl) { go(goEl.dataset.go); return; }
+  if (goEl) { if (goEl.dataset.go === 'me' && current !== 'me' && current !== 'game') meTab = 'profil'; go(goEl.dataset.go); return; }
   const el = ev.target.closest('[data-action]');
   if (!el || el.tagName === 'SELECT' || el.tagName === 'INPUT') return;
   const { action, id } = el.dataset;
+  if (gameAction(action, el)) return;
   const dlg = document.getElementById('dialog');
   switch (action) {
     case 'speak': speak(briefingText()); break;
@@ -1121,6 +1478,7 @@ document.addEventListener('click', ev => {
       afterAction(g, g ? 'Ranzen gepackt' : '');
       break;
     }
+    case 'scroll-ranzen': document.getElementById('ranzen')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
     case 'hw-new': openHomeworkDialog(); break;
     case 'hw-edit': openHomeworkDialog(id); break;
     case 'hw-toggle': toggleHomework(id); break;
@@ -1138,15 +1496,24 @@ document.addEventListener('click', ev => {
     case 'subj-edit': openSubjectDialog(id); break;
     case 'subj-delete':
       S.subjects = S.subjects.filter(s => s.id !== id);
-      Object.keys(S.timetable).forEach(d => { S.timetable[d] = (S.timetable[d] || []).map(x => x === id ? '' : x); });
       dlg.close(); save(); render(); toast('Fach gelöscht');
       break;
     case 'base-edit': openBaseItemsDialog(); break;
+    case 'me-tab': meTab = el.dataset.tab; render(); window.scrollTo({ top: 0 }); break;
+    case 'shop-cat': shopCat = el.dataset.cat; render(); break;
     case 'equip': {
-      const c = COSMETICS.find(x => x.id === id);
+      const c = cosmetic(id);
       if (c && c.lvl <= levelInfo().lvl) { S.equipped[c.cat] = c.id; save(); render(); }
       break;
     }
+    case 'album': albumOffset = Math.min(0, albumOffset + Number(el.dataset.dir)); render(); break;
+    case 'daily-start': startGame(dailyGame().id, true); break;
+    case 'game-start': startGame(id, false); break;
+    case 'focus-start': startFocus(id); break;
+    case 'focus-stop': S.focus = null; save(); renderFocus(); break;
+    case 'focus-again': startFocus(S.focus && S.focus.hwId); break;
+    case 'focus-done': { const hid = S.focus && S.focus.hwId; S.focus = null; save(); if (hid) toggleHomework(hid); else render(); break; }
+    case 'open-settings': meTab = 'settings'; go('me'); break;
     case 'holiday-new': openHolidayDialog(); break;
     case 'holiday-delete':
       S.settings.holidays = S.settings.holidays.filter(h => h.id !== id);
@@ -1167,14 +1534,7 @@ document.addEventListener('change', ev => {
   const el = ev.target;
   const action = el.dataset && el.dataset.action;
   if (!action) return;
-  if (action === 'tt') {
-    const d = el.dataset.day, p = Number(el.dataset.p);
-    const row = S.timetable[d] || (S.timetable[d] = []);
-    row[p] = el.value;
-    save();
-  } else if (action === 'periods') {
-    S.settings.periods = Number(el.value); save(); render();
-  } else if (action === 'set-name') {
+  if (action === 'set-name') {
     S.settings.name = el.value.trim() || 'du'; save(); render();
   } else if (action === 'set-hour') {
     S.settings.afterSchoolHour = Number(el.value); save(); render();
@@ -1187,13 +1547,14 @@ document.addEventListener('change', ev => {
   }
 });
 
-window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (VIEWS[v] && v !== current) { current = v; render(); } });
+window.addEventListener('hashchange', () => { const v = location.hash.slice(1); if (VIEWS[v] && v !== 'game' && v !== current) { current = v; render(); } });
 
 // Beim Zurückkehren in die App (z. B. am nächsten Morgen) neu zeichnen.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); autoSync(); } });
 
 if ('speechSynthesis' in window) window.speechSynthesis.onvoiceschanged = () => {};
 
+checkBadges();
 render();
 autoSync();
 
