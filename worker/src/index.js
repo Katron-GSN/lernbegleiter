@@ -148,10 +148,14 @@ async function untis(env, fetchFn, from, to) {
     if (t.ok) bearer = (await t.text()).trim().replace(/^"|"$/g, '');
     debug.token = !!bearer;
   } catch { /* optional */ }
-  if (!personId) personId = await webPersonId(base, cookie(), bearer, fetchFn);
+  if (!personId) {
+    const found = await webPersonId(base, cookie(), bearer, fetchFn);
+    personId = found.id;
+    debug.personIdSources = found.tried.join(', ');
+  }
   debug.personType = personType;
   debug.hasPersonId = !!personId;
-  if (!personId) throw new Error('WebUntis: angemeldet, aber Schüler-ID nicht gefunden');
+  if (!personId) throw new Error(`WebUntis: angemeldet, aber Schüler-ID nicht gefunden (${debug.personIdSources})`);
   const rest = async path => {
     const headers = { Cookie: cookie(), Accept: 'application/json' };
     if (bearer) {
@@ -241,18 +245,43 @@ export async function webLogin(base, school, schoolCookie, user, password, fetch
   return m[1];
 }
 
-/* Schüler-ID nach Web-Anmeldung: aus den App-Daten der Webseite oder aus dem Token. */
+/* Schüler-ID nach Web-Anmeldung. WebUntis legt sie je nach Version an verschiedenen Stellen ab,
+ * deshalb werden mehrere Quellen probiert. Gibt { id, tried } zurück; tried beschreibt jede Quelle kurz. */
 export async function webPersonId(base, cookieHeader, bearer, fetchFn = fetch) {
-  const fromJwt = bearer && (jwtClaim(bearer, 'person_id') || jwtClaim(bearer, 'personId'));
-  if (fromJwt) return Number(fromJwt);
-  try {
-    const headers = { Cookie: cookieHeader, Accept: 'application/json' };
-    if (bearer) headers.Authorization = 'Bearer ' + bearer;
-    const res = await fetchFn(`${base}/api/rest/view/v1/app/data`, { headers });
-    if (!res.ok) return null;
-    const d = await res.json();
-    return (d && d.user && d.user.person && d.user.person.id) || null;
-  } catch { return null; }
+  const tried = [];
+  for (const c of ['person_id', 'personId', 'studentId', 'student_id']) {
+    const v = bearer && jwtClaim(bearer, c);
+    if (v) return { id: Number(v), tried: ['token:' + c] };
+  }
+  tried.push(bearer ? 'token ohne ID' : 'kein token');
+  const headers = { Cookie: cookieHeader, Accept: 'application/json' };
+  if (bearer) {
+    headers.Authorization = 'Bearer ' + bearer;
+    const tenant = jwtClaim(bearer, 'tenant_id');
+    if (tenant) headers['Tenant-Id'] = String(tenant);
+  }
+  const sources = [
+    ['app/data', '/api/rest/view/v1/app/data', d => d && d.user && d.user.person && d.user.person.id],
+    ['app/config', '/api/app/config', d => {
+      const u = d && d.data && d.data.loginServiceConfig && d.data.loginServiceConfig.user;
+      return u && (u.personId || (u.person && u.person.id));
+    }],
+    ['daytimetable', '/api/daytimetable/config', d => d && d.data && (d.data.elementId || (d.data.element && d.data.element.id))],
+    ['pageconfig', '/api/public/timetable/weekly/pageconfig?type=5', d => {
+      const els = (d && d.data && d.data.elements) || [];
+      return els.length === 1 ? els[0].id : (d && d.data && d.data.selectedElementId);
+    }]
+  ];
+  for (const [name, path, pick] of sources) {
+    try {
+      const res = await fetchFn(base + path, { headers });
+      if (!res.ok) { tried.push(`${name} ${res.status}`); continue; }
+      const id = pick(await res.json().catch(() => null));
+      if (id) return { id: Number(id), tried: [...tried, name + ' ok'] };
+      tried.push(`${name} ohne ID`);
+    } catch (e) { tried.push(`${name} Fehler`); }
+  }
+  return { id: null, tried };
 }
 
 /* Findet den Login-Namen der Schule über die öffentliche WebUntis-Schulsuche,
