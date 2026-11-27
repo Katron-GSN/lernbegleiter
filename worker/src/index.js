@@ -113,15 +113,33 @@ async function untis(env, fetchFn, from, to) {
   };
   const cookie = () => `${session ? 'JSESSIONID=' + session + '; ' : ''}${schoolCookie}`;
 
-  const auth = await rpc('authenticate', { user: env.UNTIS_USER, password: env.UNTIS_PASSWORD, client: 'Lernbegleiter' });
-  if (!auth || !auth.sessionId) throw new Error('WebUntis-Anmeldung fehlgeschlagen');
-  session = auth.sessionId;
-  const personId = auth.personId;
-  const personType = auth.personType || 5;
+  const debug = {};
+  let personId = null;
+  let personType = 5;
+  // Erster Weg: JSON-RPC authenticate. Scheitert bei manchen Konten mit einem internen Serverfehler
+  // (z. B. „Index 1 out of bounds“), obwohl der Login auf der Webseite klappt.
+  try {
+    const auth = await rpc('authenticate', { user: env.UNTIS_USER, password: env.UNTIS_PASSWORD, client: 'Lernbegleiter' });
+    if (!auth || !auth.sessionId) throw new Error('WebUntis-Anmeldung fehlgeschlagen');
+    session = auth.sessionId;
+    personId = auth.personId;
+    personType = auth.personType || 5;
+    debug.login = 'rpc';
+  } catch (e) {
+    const rpcError = String(e.message || e);
+    if (/bad credentials/i.test(rpcError)) throw new Error('WebUntis: Benutzername oder Passwort falsch');
+    // Zweiter Weg: dieselbe Anmeldung wie auf der WebUntis-Webseite
+    try {
+      session = await webLogin(base, school, schoolCookie, env.UNTIS_USER, env.UNTIS_PASSWORD, fetchFn);
+      debug.login = 'web';
+      debug.rpcLoginError = rpcError;
+    } catch (e2) {
+      throw new Error(`${rpcError} · Web-Anmeldung: ${String(e2.message || e2)}`);
+    }
+  }
 
   const out = { lessons: [], homework: [], exams: [] };
   const errors = [];
-  const debug = { personType, hasPersonId: !!personId };
 
   // REST-Endpunkte brauchen teils ein Token
   let bearer = '';
@@ -130,6 +148,10 @@ async function untis(env, fetchFn, from, to) {
     if (t.ok) bearer = (await t.text()).trim().replace(/^"|"$/g, '');
     debug.token = !!bearer;
   } catch { /* optional */ }
+  if (!personId) personId = await webPersonId(base, cookie(), bearer, fetchFn);
+  debug.personType = personType;
+  debug.hasPersonId = !!personId;
+  if (!personId) throw new Error('WebUntis: angemeldet, aber Schüler-ID nicht gefunden');
   const rest = async path => {
     const headers = { Cookie: cookie(), Accept: 'application/json' };
     if (bearer) {
@@ -197,6 +219,40 @@ async function untis(env, fetchFn, from, to) {
 
   try { await rpc('logout', {}); } catch { /* egal */ }
   return { ...out, errors, debug };
+}
+
+/* Anmeldung wie im Browser (Formular-Login). Gibt die neue JSESSIONID zurück. */
+export async function webLogin(base, school, schoolCookie, user, password, fetchFn = fetch) {
+  const body = new URLSearchParams({ school, j_username: user || '', j_password: password || '', token: '' });
+  const res = await fetchFn(`${base}/j_spring_security_check`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', Cookie: schoolCookie },
+    body
+  });
+  const setCookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [res.headers.get('set-cookie') || ''];
+  const m = setCookies.join(';').match(/JSESSIONID=([^;,\s]+)/);
+  const text = await res.text().catch(() => '');
+  let state = '';
+  try { state = JSON.parse(text).state || ''; } catch { /* keine JSON-Antwort */ }
+  if (state && state !== 'SUCCESS') throw new Error(`Status ${state}`);
+  if (/loginError|bad credentials|invalid/i.test(text)) throw new Error('Benutzername oder Passwort falsch');
+  if (!m) throw new Error(`keine Sitzung erhalten (HTTP ${res.status})`);
+  return m[1];
+}
+
+/* Schüler-ID nach Web-Anmeldung: aus den App-Daten der Webseite oder aus dem Token. */
+export async function webPersonId(base, cookieHeader, bearer, fetchFn = fetch) {
+  const fromJwt = bearer && (jwtClaim(bearer, 'person_id') || jwtClaim(bearer, 'personId'));
+  if (fromJwt) return Number(fromJwt);
+  try {
+    const headers = { Cookie: cookieHeader, Accept: 'application/json' };
+    if (bearer) headers.Authorization = 'Bearer ' + bearer;
+    const res = await fetchFn(`${base}/api/rest/view/v1/app/data`, { headers });
+    if (!res.ok) return null;
+    const d = await res.json();
+    return (d && d.user && d.user.person && d.user.person.id) || null;
+  } catch { return null; }
 }
 
 /* Findet den Login-Namen der Schule über die öffentliche WebUntis-Schulsuche,
