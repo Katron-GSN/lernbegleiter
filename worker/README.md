@@ -1,6 +1,6 @@
 # Abrufdienst für die Schulanbindung
 
-Dieser kleine Dienst läuft kostenlos bei Cloudflare. Er meldet sich mit Pauls Zugang bei WebUntis an, liest den itslearning-Kalender und gibt der App nur die fertigen Daten weiter. Pauls Passwort liegt dadurch nie im Browser und nie im öffentlichen GitHub-Repo.
+Dieser kleine Dienst läuft kostenlos bei Cloudflare. Er meldet sich mit dem Zugang deines Kindes bei WebUntis an, liest den itslearning-Kalender und gibt der App nur die fertigen Daten weiter. Das Passwort liegt dadurch nie im Browser und nie im öffentlichen GitHub-Repo.
 
 Die Einrichtung geht komplett im Browser, ohne Programme auf dem PC. Sie dauert etwa 15 Minuten.
 
@@ -13,7 +13,7 @@ Auf [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) ein koste
 So holt sich Cloudflare jede neue Version aus dem Repo automatisch.
 
 1. **Workers & Pages** → **Erstellen** → **Repository importieren** (bzw. „Import a repository“).
-2. GitHub verbinden und Zugriff auf `NB-GSN/lernbegleiter` erlauben.
+2. GitHub verbinden und Zugriff auf `Katron-GSN/lernbegleiter` erlauben.
 3. Das Repository `lernbegleiter` auswählen.
 4. Einstellungen: Projektname `lernbegleiter-sync`, **Root-Verzeichnis `worker`**, Build-Befehl leer, Deploy-Befehl `npx wrangler deploy`.
 5. **Bereitstellen**. Die Adresse steht danach oben beim Worker. Test: `<Adresse>/health` im Browser zeigt `{"ok":true,…}`.
@@ -26,13 +26,13 @@ Beim Worker unter **Einstellungen → Variablen und Geheimnisse** diese Einträg
 
 | Name | Was hinein gehört |
 | --- | --- |
-| `ALLOWED_ORIGIN` | `https://nb-gsn.github.io` (Typ Text, nur ohne GitHub-Verbindung) |
+| `ALLOWED_ORIGIN` | `https://katron-gsn.github.io` (Typ Text, nur ohne GitHub-Verbindung) |
 | `APP_KEY` | Ein langes, frei ausgedachtes Passwort. Dasselbe kommt später in die App. |
 | `UNTIS_SERVER` | Der Servername aus der WebUntis-Adresszeile, z. B. `nessa.webuntis.com` |
 | `UNTIS_SCHOOL` | Optional. Leer lassen, dann sucht der Dienst die Schule selbst. Nur nötig, wenn die App „Schule nicht gefunden“ meldet. |
-| `UNTIS_USER` | Pauls WebUntis-Benutzername |
-| `UNTIS_PASSWORD` | Pauls WebUntis-Passwort |
-| `ITSL_ICAL_URL` | Pauls iCal-Link aus itslearning (Kalender → iCal-Feed abrufen) |
+| `UNTIS_USER` | WebUntis-Benutzername des Kindes |
+| `UNTIS_PASSWORD` | WebUntis-Passwort des Kindes |
+| `ITSL_ICAL_URL` | iCal-Link des Kindes aus itslearning (Kalender → iCal-Feed abrufen) |
 
 Danach erneut **Bereitstellen**. Die Adresse des Dienstes steht oben beim Worker, z. B. `https://lernbegleiter-sync.<name>.workers.dev`.
 
@@ -43,7 +43,7 @@ In der App unter **Ich → Einstellungen → Schulanbindung** die Adresse des Di
 ## Gut zu wissen
 
 - **Inoffizielle Schnittstelle:** WebUntis bietet für Familien keine offizielle Schnittstelle. Der Dienst nutzt dieselben Wege wie die WebUntis-Webseite. Das kann sich bei Updates ändern.
-- **Login über Schulkonto:** Wenn sich Paul bei WebUntis nur über ein Microsoft- oder Schulkonto (Single Sign-on) anmelden kann, funktioniert die Anmeldung mit Benutzername und Passwort nicht. Dann zeigt die App unter „Schulanbindung“ ein Problem bei `webuntis` an.
+- **Login über Schulkonto:** Wenn sich das Kind bei WebUntis nur über ein Microsoft- oder Schulkonto (Single Sign-on) anmelden kann, funktioniert die Anmeldung mit Benutzername und Passwort nicht. Dann zeigt die App unter „Schulanbindung“ ein Problem bei `webuntis` an.
 - **Teilweise Daten:** Klappt nur ein Teil (z. B. Stundenplan ja, Hausaufgaben nein), zeigt die App die Daten, die da sind, und nennt die Quelle mit Problem.
 - Ein Abruf wird 10 Minuten zwischengespeichert. **Jetzt abrufen** in der App holt immer frisch.
 

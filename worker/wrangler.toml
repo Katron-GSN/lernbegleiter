@@ -5,5 +5,5 @@ compatibility_date = "2025-06-01"
 keep_vars = true
 
 [vars]
-ALLOWED_ORIGIN = "https://nb-gsn.github.io"
+ALLOWED_ORIGIN = "https://katron-gsn.github.io"
 UNTIS_SERVER = "gsnpb.webuntis.com"

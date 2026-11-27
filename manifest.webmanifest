@@ -1,7 +1,7 @@
 {
   "name": "Lernbegleiter",
   "short_name": "Lernbegleiter",
-  "description": "Dein Schultag auf einen Blick: Stundenplan, Ranzen, Hausaufgaben, Termine und XP.",
+  "description": "Dein Schultag auf einen Blick: Stundenplan, Hausaufgaben, Termine und XP.",
   "lang": "de",
   "start_url": "./#today",
   "scope": "./",

@@ -76,8 +76,10 @@ function defaultState() {
   return {
     version: 1,
     settings: {
-      name: 'Paul',
+      name: '',
       afterSchoolHour: 14,
+      ranzen: false, // Taschen-Check (für Jüngere), in den Einstellungen einschaltbar
+      extras: false, // Werkstatt, Rätsel und Sticker, in den Einstellungen einschaltbar
       baseItems: ['Federmäppchen', 'iPad geladen', 'Trinkflasche'],
       holidays: [],
       syncUrl: '',
@@ -124,6 +126,10 @@ function save() {
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
 const subjectById = id => S.subjects.find(s => s.id === id);
+const ranzenOn = () => !!S.settings.ranzen;
+const extrasOn = () => !!S.settings.extras;
+const packedOk = rec => !ranzenOn() || !!rec.ranzen; // ohne Taschen-Check zählt dieser Teil als erledigt
+const greetName = () => S.settings.name ? ' ' + S.settings.name : '';
 const dayRec = d => (S.days[d] ||= {});
 
 /* ---------- Schultage, Serie, Level ---------- */
@@ -239,7 +245,7 @@ function checkGoals() {
   const rec = dayRec(today);
   const tomorrow = nextSchoolDay(today);
   const openSoon = S.homework.filter(h => !h.doneAt && h.due <= tomorrow);
-  if (!rec.goal && rec.ranzen && openSoon.length === 0) {
+  if (!rec.goal && packedOk(rec) && openSoon.length === 0) {
     rec.goal = true;
     goalJustReached = true;
     gained += award(XP.dayGoal, 'Tagesziel erreicht', 'goal:' + today);
@@ -262,7 +268,7 @@ function afterAction(gained, msg) {
   gained += checkGoals();
   checkBadges();
   save();
-  if (goalJustReached) { goalJustReached = false; toast(`+${gained} XP · Tagesziel geschafft, das Tagesrätsel ist frei`, 'level'); }
+  if (goalJustReached) { goalJustReached = false; toast(`+${gained} XP · Tagesziel geschafft${extrasOn() ? ', das Tagesrätsel ist frei' : ''}`, 'level'); }
   else if (gained > 0) toast(`+${gained} XP${msg ? ' · ' + msg : ''}`);
   render();
 }
@@ -272,7 +278,7 @@ function afterAction(gained, msg) {
 const countLog = prefix => S.log.filter(l => l.k && l.k.startsWith(prefix)).length;
 const BADGES = [
   { id: 'start', code: 'GO', name: 'Gestartet', desc: 'Die ersten XP gesammelt', test: () => S.xp > 0 },
-  { id: 'ranzen20', code: 'R20', name: 'Ranzen-Profi', desc: '20 Ranzen-Checks', test: () => countLog('ranzen:') >= 20 },
+  { id: 'ranzen20', code: 'R20', name: 'Gut gepackt', desc: '20 Taschen-Checks', needs: 'ranzen', test: () => countLog('ranzen:') >= 20 },
   { id: 'ontime10', code: 'P10', name: 'Pünktlich', desc: '10 Hausaufgaben pünktlich erledigt', test: () => countLog('hwt:') >= 10 },
   { id: 'self5', code: 'S5', name: 'Selbstständig', desc: '5 selbst eingetragene Aufgaben erledigt', test: () => countLog('hws:') >= 5 },
   { id: 'week1', code: 'W1', name: 'Wochensieg', desc: 'Erstes Wochenziel geschafft', test: () => countLog('week:') >= 1 },
@@ -280,13 +286,14 @@ const BADGES = [
   { id: 'streak5', code: '5', name: 'Serie 5', desc: '5 Schultage am Stück', test: () => S.bestStreak >= 5 },
   { id: 'streak10', code: '10', name: 'Serie 10', desc: '10 Schultage am Stück', test: () => S.bestStreak >= 10 },
   { id: 'streak25', code: '25', name: 'Serie 25', desc: '25 Schultage am Stück', test: () => S.bestStreak >= 25 },
-  { id: 'puzzle1', code: 'T1', name: 'Tüftler', desc: 'Erstes Tagesrätsel gelöst', test: () => Object.keys(S.stickers).length >= 1 },
-  { id: 'puzzle10', code: 'T10', name: 'Rätselfuchs', desc: '10 Tagesrätsel gelöst', test: () => Object.keys(S.stickers).length >= 10 },
-  { id: 'sudoku9', code: '9×9', name: 'Großmeister', desc: 'Ein Sudoku 9×9 gelöst', test: () => !!S.games.sudoku9 },
+  { id: 'puzzle1', needs: 'extras', code: 'T1', name: 'Tüftler', desc: 'Erstes Tagesrätsel gelöst', test: () => Object.keys(S.stickers).length >= 1 },
+  { id: 'puzzle10', needs: 'extras', code: 'T10', name: 'Rätselfuchs', desc: '10 Tagesrätsel gelöst', test: () => Object.keys(S.stickers).length >= 10 },
+  { id: 'sudoku9', needs: 'extras', code: '9×9', name: 'Großmeister', desc: 'Ein Sudoku 9×9 gelöst', test: () => !!S.games.sudoku9 },
   { id: 'level10', code: 'L10', name: 'Level 10', desc: 'Level 10 erreicht', test: () => levelInfo().lvl >= 10 }
 ];
+const shownBadges = () => BADGES.filter(b => !b.needs || S.settings[b.needs]);
 function checkBadges() {
-  const fresh = BADGES.filter(b => !S.badges[b.id] && b.test());
+  const fresh = shownBadges().filter(b => !S.badges[b.id] && b.test());
   fresh.forEach(b => { S.badges[b.id] = todayISO(); });
   if (fresh.length) setTimeout(() => toast(`Neues Abzeichen: ${fresh.map(b => b.name).join(', ')}`, 'level'), 1600);
 }
@@ -405,13 +412,13 @@ function ranzenItems(date) {
 }
 
 function briefingText() {
-  const name = S.settings.name || 'du';
+  const name = greetName();
   const today = todayISO();
   const t = targetDay();
   const lessons = lessonsOn(t.date);
   const lines = [];
   const hour = new Date().getHours();
-  lines.push(hour < 11 ? `Moin ${name}!` : hour < 17 ? `Hey ${name}!` : `Na ${name}, Feierabend in Sicht?`);
+  lines.push(hour < 11 ? `Moin${name}.` : hour < 17 ? `Hey${name}.` : `Abend${name}.`);
   lines.push(`Spruch des Tages: ${quoteOfDay()}`);
   if (lessons.length) {
     const running = lessons.filter(l => l.status !== 'cancelled');
@@ -429,8 +436,8 @@ function briefingText() {
   } else if (!inHoliday(t.date)) {
     lines.push(`Für ${t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label} habe ich noch keinen Stundenplan aus WebUntis.`);
   }
-  const items = ranzenItems(t.date).map(i => i.txt);
-  if (items.length) lines.push(`Für den Ranzen: ${items.join(', ')}.`);
+  const items = ranzenOn() ? ranzenItems(t.date).map(i => i.txt) : [];
+  if (items.length) lines.push(`Einpacken: ${items.join(', ')}.`);
   const open = S.homework.filter(h => !h.doneAt).sort((a, b) => a.due.localeCompare(b.due));
   const late = open.filter(h => h.due < today);
   const soon = open.filter(h => h.due >= today && h.due <= t.date);
@@ -439,7 +446,7 @@ function briefingText() {
     lines.push(`Bis ${t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label} fällig: ` +
       soon.map(h => `${subjectById(h.subjectId)?.name || 'Sonstiges'}: ${h.text}`).join('; ') + '.');
   } else if (!late.length) {
-    lines.push('Bis dahin ist keine Hausaufgabe fällig. Stark.');
+    lines.push('Bis dahin ist keine Hausaufgabe fällig.');
   }
   const upcoming = S.events.filter(e => e.date >= today && diffDays(today, e.date) <= 7).sort((a, b) => a.date.localeCompare(b.date));
   upcoming.forEach(e => {
@@ -449,7 +456,7 @@ function briefingText() {
   });
   const st = streakInfo().count;
   if (st >= 2) lines.push(`Deine Serie steht bei ${st} Schultagen.`);
-  lines.push('Viel Erfolg!');
+  lines.push('Viel Erfolg.');
   return lines;
 }
 
@@ -474,9 +481,9 @@ function nextAction(t, rec) {
   const today = todayISO();
   const horizon = nextSchoolDay(today);
   const open = S.homework.filter(h => !h.doneAt).sort((a, b) => a.due.localeCompare(b.due));
-  const items = ranzenItems(t.date);
+  const items = ranzenOn() ? ranzenItems(t.date) : [];
   const missing = items.filter(i => !S.ranzen.checked.includes(i.txt)).length;
-  // Paul kann selbst wählen, was er als Nächstes macht. Die Wahl gilt bis sie erledigt ist oder bis morgen.
+  // Das Kind kann selbst wählen, was er als Nächstes macht. Die Wahl gilt bis sie erledigt ist oder bis morgen.
   const pick = S.nextPick && S.nextPick.date === today ? S.nextPick.id : null;
   if (pick === 'ranzen' && !rec.ranzen && missing) return { kind: 'ranzen', missing, chosen: true };
   const ph = pick && open.find(h => h.id === pick);
@@ -484,7 +491,7 @@ function nextAction(t, rec) {
   const urgent = open.filter(h => h.due <= horizon);
   if (urgent.length) return { kind: 'hw', h: urgent[0], label: urgent[0].due < today ? 'Überfällig' : 'Als Nächstes' };
   if (!rec.ranzen && missing) return { kind: 'ranzen', missing };
-  if (rec.goal && !dailySolved()) return { kind: 'puzzle' };
+  if (extrasOn() && rec.goal && !dailySolved()) return { kind: 'puzzle' };
   if (open.length) return { kind: 'hw', h: open[0], label: 'Vorarbeiten' };
   return { kind: 'free' };
 }
@@ -496,8 +503,8 @@ function nextChooser(a, t, rec) {
     const s = subjectById(h.subjectId);
     return { id: h.id, tag: s ? `<span class="subj-tag" style="--c:${esc(s.color)}">${esc(s.name)}</span>` : '', text: h.text, meta: 'fällig ' + relDay(h.due) };
   });
-  const missing = ranzenItems(t.date).filter(i => !S.ranzen.checked.includes(i.txt)).length;
-  if (a.kind !== 'ranzen' && !rec.ranzen && missing) opts.push({ id: 'ranzen', tag: '', text: 'Ranzen packen', meta: `noch ${missing} Sache${missing === 1 ? '' : 'n'}` });
+  const missing = ranzenOn() ? ranzenItems(t.date).filter(i => !S.ranzen.checked.includes(i.txt)).length : 0;
+  if (a.kind !== 'ranzen' && !rec.ranzen && missing) opts.push({ id: 'ranzen', tag: '', text: 'Tasche packen', meta: `noch ${missing} Sache${missing === 1 ? '' : 'n'}` });
   if (!opts.length && !a.chosen) return '';
   return `<div class="row tight chooser">
       ${opts.length ? `<button class="btn small ghost" data-action="next-choose">${nextChoosing ? 'Auswahl schließen' : `Lieber etwas anderes (${opts.length})`}</button>` : ''}
@@ -515,16 +522,17 @@ function testFor(subjectId, from, days = 7) {
 }
 const subjTag = s => s ? `<span class="subj-tag" style="--c:${esc(s.color)}">${esc(s.name)}</span>` : '';
 
-/* Ring: Tagesziel = Ranzen gepackt + alles bis zum nächsten Schultag erledigt. */
+/* Ring: Tagesziel = (Tasche gepackt, falls eingeschaltet) + alles bis zum nächsten Schultag erledigt. */
 function goalRing(rec) {
   const horizon = nextSchoolDay(todayISO());
   const hwOk = S.homework.filter(h => !h.doneAt && h.due <= horizon).length === 0;
-  const parts = (rec.ranzen ? 1 : 0) + (hwOk ? 1 : 0);
-  const done = rec.goal ? 2 : parts;
+  const total = ranzenOn() ? 2 : 1;
+  const parts = (ranzenOn() && rec.ranzen ? 1 : 0) + (hwOk ? 1 : 0);
+  const done = rec.goal ? total : Math.min(parts, total);
   const c = 2 * Math.PI * 46;
-  return `<div class="ring" role="img" aria-label="Tagesziel ${done} von 2">
-    <svg viewBox="0 0 112 112" aria-hidden="true"><circle class="track" cx="56" cy="56" r="46"/>${done ? `<circle class="bar" cx="56" cy="56" r="46" stroke-dasharray="${(c * done / 2).toFixed(1)} ${c.toFixed(1)}"/>` : ''}</svg>
-    <div class="rl"><div>${done === 2 ? ICON.check.replace('width="16" height="16"', 'width="30" height="30"') : done + '/2'}<small>Tagesziel</small></div></div></div>`;
+  return `<div class="ring" role="img" aria-label="Tagesziel ${done} von ${total}">
+    <svg viewBox="0 0 112 112" aria-hidden="true"><circle class="track" cx="56" cy="56" r="46"/>${done ? `<circle class="bar" cx="56" cy="56" r="46" stroke-dasharray="${(c * done / total).toFixed(1)} ${c.toFixed(1)}"/>` : ''}</svg>
+    <div class="rl"><div>${done === total ? ICON.check.replace('width="16" height="16"', 'width="30" height="30"') : done + '/' + total}<small>Tagesziel</small></div></div></div>`;
 }
 
 function nextCard(t, rec) {
@@ -540,9 +548,9 @@ function nextCard(t, rec) {
     buttons = `<button class="btn small primary" data-action="hw-toggle" data-id="${esc(a.h.id)}">${ICON.check} Erledigt</button>`;
   } else if (a.kind === 'ranzen') {
     label = 'Als Nächstes';
-    title = `Ranzen packen für ${esc(t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label)}`;
+    title = `Tasche packen für ${esc(t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label)}`;
     meta = `Noch ${a.missing} Sache${a.missing === 1 ? '' : 'n'}`;
-    buttons = `<button class="btn small primary" data-action="scroll-ranzen">Zum Ranzen-Check</button>`;
+    buttons = `<button class="btn small primary" data-action="scroll-ranzen">Zum Taschen-Check</button>`;
   } else if (a.kind === 'puzzle') {
     const g = dailyGame();
     label = 'Tagesziel geschafft';
@@ -552,7 +560,7 @@ function nextCard(t, rec) {
   } else {
     label = 'Alles erledigt';
     title = 'Nichts mehr offen. Feierabend.';
-    meta = dailySolved() ? 'Tagesrätsel gelöst, der Sticker ist im Album.' : 'Neue Aufgaben kommen automatisch aus WebUntis und itslearning.';
+    meta = extrasOn() && dailySolved() ? 'Tagesrätsel gelöst, der Sticker ist im Album.' : 'Neue Aufgaben kommen automatisch aus WebUntis und itslearning.';
     buttons = '';
   }
   const today = todayISO();
@@ -571,9 +579,9 @@ function nextCard(t, rec) {
     </div>
     <div class="actions">${buttons}${nextChooser(a, t, rec)}</div>
     <div class="goalline" aria-label="Tagesziel">
-      <span class="${rec.ranzen ? 'ok' : ''}">${rec.ranzen ? ICON.check + ' Ranzen gepackt' : 'Ranzen offen'}</span>
+      ${ranzenOn() ? `<span class="${rec.ranzen ? 'ok' : ''}">${rec.ranzen ? ICON.check + ' Tasche gepackt' : 'Tasche offen'}</span>` : ''}
       <span class="${openSoon === 0 ? 'ok' : ''}">${openSoon === 0 ? ICON.check + ' Aufgaben erledigt' : openSoon + (openSoon === 1 ? ' Aufgabe offen' : ' Aufgaben offen')}</span>
-      <span class="${solved ? 'ok' : rec.goal ? 'ready' : ''}">${solved ? ICON.check + ' Rätsel gelöst' : rec.goal ? 'Tagesrätsel frei' : ICON.lock + ' Tagesrätsel'}</span>
+      ${extrasOn() ? `<span class="${solved ? 'ok' : rec.goal ? 'ready' : ''}">${solved ? ICON.check + ' Rätsel gelöst' : rec.goal ? 'Tagesrätsel frei' : ICON.lock + ' Tagesrätsel'}</span>` : ''}
       <span class="${S.weeks[isoWeekKey(today)] ? 'ok' : ''}">Woche ${weekGoalCount()}/${WEEK_GOAL_DAYS}</span>
     </div>
   </section>`;
@@ -594,7 +602,7 @@ function lessonRow(l, date, compact = false) {
   </div>`;
 }
 
-const MOTTOS = ['Du packst das.', 'Heute wird gut.', 'Schritt für Schritt.', 'Auf geht\'s.', 'Läuft bei dir.', 'Bleib dran.', 'Du hast das im Griff.'];
+const MOTTOS = ['Eins nach dem anderen.', 'Kurz rein, dann frei.', 'Schritt für Schritt.', 'Erst das Wichtige.', 'Läuft.', 'Dranbleiben.', 'Alles im Blick.'];
 
 function viewToday() {
   const today = todayISO();
@@ -617,8 +625,8 @@ function viewToday() {
   const st = streakInfo();
 
   const greet = now.getHours() < 11 ? 'Moin' : now.getHours() < 17 ? 'Hey' : 'Guten Abend';
-  const motto = rec.goal ? 'Stark gemacht.' : MOTTOS[(Math.floor(parse(today) / 864e5)) % MOTTOS.length];
-  const brief = briefingText().slice(2).filter(l => l !== 'Viel Erfolg!' && !l.startsWith('Deine Serie'));
+  const motto = rec.goal ? 'Für heute erledigt.' : MOTTOS[(Math.floor(parse(today) / 864e5)) % MOTTOS.length];
+  const brief = briefingText().slice(2).filter(l => l !== 'Viel Erfolg.' && !l.startsWith('Deine Serie'));
 
   return `
   <div class="stack">
@@ -628,7 +636,7 @@ function viewToday() {
           <span class="eyebrow">Heute · ${WEEKDAYS[now.getDay()]}, ${now.getDate()}. ${MONTHS_LONG[now.getMonth()]}${inHoliday(today) ? ' · Ferien' : ''}</span>
           <button class="xp" data-go="me" aria-label="Zu deinem Profil"><span class="streak">🔥 ${st.count}</span><span>Lv ${lv.lvl} · ${S.xp.toLocaleString('de-DE')} XP</span></button>
         </div>
-        <h1>${greet} ${esc(S.settings.name)}! <span class="gradtext">${esc(motto)}</span></h1>
+        <h1>${greet}${esc(greetName())}. <span class="gradtext">${esc(motto)}</span></h1>
         <p class="quote">${esc(quoteOfDay())}</p>
         <div class="brief-text">${brief.map(l => `<p>${esc(l)}</p>`).join('')}</div>
         <div class="row tight">
@@ -646,7 +654,7 @@ function viewToday() {
       <button class="card stat c-green" data-go="homework"><span class="v">${open.length}</span><span class="l">${open.length === 1 ? 'Aufgabe' : 'Aufgaben'} offen</span></button>
     </section>
 
-    <div class="grid-2">
+    <div class="${ranzenOn() ? 'grid-2' : 'stack'}">
       <section class="card">
         <div class="card-head"><h2>Dein Tag ${esc(t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : 'am ' + t.label)}</h2><span class="tag">${fmtDate(t.date)}</span></div>
         ${lessons.length ? `<div class="lessons">${lessons.map(l => lessonRow(l, t.date)).join('')}</div>`
@@ -655,8 +663,8 @@ function viewToday() {
         : `<p class="empty">Der Stundenplan kommt aus WebUntis.</p><div class="row"><button class="btn small" data-action="open-settings">Schulanbindung einrichten</button></div>`}
       </section>
 
-      <section class="card" id="ranzen">
-        <div class="card-head"><h2>🎒 Ranzen für ${esc(tLower)}</h2>${rec.ranzen ? `<span class="pill p-good">${ICON.check} gepackt</span>` : `<span class="tag">+${XP.ranzen} XP</span>`}</div>
+      ${ranzenOn() ? `<section class="card" id="ranzen">
+        <div class="card-head"><h2>🎒 Tasche für ${esc(tLower)}</h2>${rec.ranzen ? `<span class="pill p-good">${ICON.check} gepackt</span>` : `<span class="tag">+${XP.ranzen} XP</span>`}</div>
         ${items.length ? `<ul class="check-list">${items.map(i => `
           <li><button class="check ${checked.has(i.txt) ? 'done' : ''}" data-action="pack" data-item="${esc(i.txt)}">
             <span class="box">${boxMark(checked.has(i.txt))}</span>
@@ -665,7 +673,7 @@ function viewToday() {
           </button></li>`).join('')}</ul>
           ${allPacked ? '' : `<div class="row"><button class="btn small ghost" data-action="pack-all">Alles drin</button></div>`}`
         : `<p class="empty">Nichts zu packen.</p>`}
-      </section>
+      </section>` : ''}
     </div>
 
     <section class="card">
@@ -813,7 +821,7 @@ function toggleHomework(id) {
   afterAction(g, 'Aufgabe erledigt');
 }
 
-/* ---------- Ansicht: Termine (Pauls eigener Schulkalender) ---------- */
+/* ---------- Ansicht: Termine (eigener Schulkalender) ---------- */
 
 function viewEvents() {
   const today = todayISO();
@@ -910,20 +918,20 @@ function viewPlan() {
     </section>`}
 
     <section class="card">
-      <div class="card-head"><h2>Fächer und was in den Ranzen gehört</h2><button class="btn small" data-action="subj-new">+ Fach</button></div>
+      <div class="card-head"><h2>${ranzenOn() ? 'Fächer und was in die Tasche gehört' : 'Fächer'}</h2><button class="btn small" data-action="subj-new">+ Fach</button></div>
       <div class="list">${S.subjects.map(s => `
         <div class="subject-row">
           <span class="sw" style="background:${esc(s.color)}"></span>
-          <div><div><b>${esc(s.name)}</b></div><div class="items">${esc((s.items || []).join(', ') || 'keine Sachen eingetragen')}</div></div>
+          <div><div><b>${esc(s.name)}</b></div>${ranzenOn() ? `<div class="items">${esc((s.items || []).join(', ') || 'keine Sachen eingetragen')}</div>` : ''}</div>
           <button class="icon-btn" data-action="subj-edit" data-id="${esc(s.id)}" aria-label="${esc(s.name)} bearbeiten">${ICON.edit}</button>
         </div>`).join('')}
       </div>
     </section>
 
-    <section class="card">
+    ${ranzenOn() ? `<section class="card">
       <div class="card-head"><h2>Kommt immer mit</h2><button class="icon-btn" data-action="base-edit" aria-label="Bearbeiten">${ICON.edit}</button></div>
       <p>${esc(S.settings.baseItems.join(', ') || 'Nichts eingetragen')}</p>
-    </section>
+    </section>` : ''}
   </div>`;
 }
 
@@ -938,7 +946,7 @@ function openSubjectDialog(id) {
       <div class="field">Farbe
         <div class="swatches">${COLORS.map(c => `<button type="button" data-color="${c}" class="${c === color ? 'on' : ''}" style="background:${c}" aria-label="Farbe ${c}"></button>`).join('')}</div>
       </div>
-      <label class="field">Sachen für den Ranzen (eine pro Zeile)
+      <label class="field">Sachen für die Tasche (eine pro Zeile, nur für den Taschen-Check)
         <textarea name="items" placeholder="Buch&#10;Heft">${esc(s ? (s.items || []).join('\n') : '')}</textarea>
       </label>
       <div class="row end">
@@ -1143,7 +1151,8 @@ let shopCat = 'color';
 let albumOffset = 0;
 
 function viewMe() {
-  const tabs = [['profil', 'Profil'], ['werkstatt', 'Werkstatt'], ['spiele', 'Rätsel'], ['settings', 'Einstellungen']];
+  const tabs = [['profil', 'Profil'], ...(extrasOn() ? [['werkstatt', 'Werkstatt'], ['spiele', 'Rätsel']] : []), ['settings', 'Einstellungen']];
+  if (!tabs.some(([k]) => k === meTab)) meTab = 'profil';
   const body = { profil: meProfile, werkstatt: meShop, spiele: meGames, settings: meSettings }[meTab] || meProfile;
   return `
   <div class="stack">
@@ -1153,6 +1162,7 @@ function viewMe() {
 }
 
 function nextUnlocks(lvl) {
+  if (!extrasOn()) return null;
   const all = [...COSMETICS.map(c => ({ lvl: c.lvl, name: c.name + ' (' + CAT_NAMES[c.cat] + ')' })), ...GAMES.map(g => ({ lvl: g.lvl, name: g.name }))];
   const nextLvl = Math.min(...all.filter(x => x.lvl > lvl).map(x => x.lvl));
   return isFinite(nextLvl) ? { lvl: nextLvl, names: all.filter(x => x.lvl === nextLvl).map(x => x.name) } : null;
@@ -1165,17 +1175,18 @@ function meProfile() {
   const mon = mondayOf(today);
   const week = [0, 1, 2, 3, 4].map(i => addDays(mon, i));
   const next = nextUnlocks(lv.lvl);
-  const earned = BADGES.filter(b => S.badges[b.id]).length;
+  const badges = shownBadges();
+  const earned = badges.filter(b => S.badges[b.id]).length;
   return `
     <section class="card profile">
       <div class="avatar">${robotSVG(S.equipped, 'p')}</div>
       <div class="profile-info">
         <span class="label">${esc(equippedOf('title').name)}</span>
-        <h1>${esc(S.settings.name)}</h1>
+        <h1>${esc(S.settings.name || 'Profil')}</h1>
         <div class="lvl-row"><b>Level ${lv.lvl}</b><span class="muted">${S.xp} XP</span></div>
         <div class="bar"><span style="width:${lv.pct}%"></span></div>
         <p class="muted small">Noch ${lv.to - S.xp} XP bis Level ${lv.lvl + 1}${next && next.lvl === lv.lvl + 1 ? ' · dann neu: ' + esc(next.names.join(', ')) : ''}</p>
-        <button class="btn small" data-action="me-tab" data-tab="werkstatt">Roboter anpassen</button>
+        ${extrasOn() ? `<button class="btn small" data-action="me-tab" data-tab="werkstatt">Roboter anpassen</button>` : ''}
       </div>
     </section>
 
@@ -1195,14 +1206,14 @@ function meProfile() {
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>Abzeichen</h2><span class="tag">${earned} von ${BADGES.length}</span></div>
-      <div class="badges">${BADGES.map(b => `<div class="badge ${S.badges[b.id] ? 'on' : ''}" title="${esc(b.desc)}">${badgeSVG(b, !!S.badges[b.id])}<b>${esc(b.name)}</b><span>${esc(b.desc)}</span></div>`).join('')}</div>
+      <div class="card-head"><h2>Abzeichen</h2><span class="tag">${earned} von ${badges.length}</span></div>
+      <div class="badges">${badges.map(b => `<div class="badge ${S.badges[b.id] ? 'on' : ''}" title="${esc(b.desc)}">${badgeSVG(b, !!S.badges[b.id])}<b>${esc(b.name)}</b><span>${esc(b.desc)}</span></div>`).join('')}</div>
     </section>
 
     <details class="card fold">
       <summary><h2>So gibt es XP</h2></summary>
       <table class="xp-table"><tbody>
-        <tr><td>Ranzen-Check erledigt</td><td>+${XP.ranzen}</td></tr>
+        ${ranzenOn() ? `<tr><td>Taschen-Check erledigt</td><td>+${XP.ranzen}</td></tr>` : ''}
         <tr><td>Briefing gelesen oder gehört</td><td>+${XP.briefing}</td></tr>
         <tr><td>Hausaufgabe erledigt</td><td>+${XP.hwDone}</td></tr>
         <tr><td>… pünktlich</td><td>+${XP.hwOnTime}</td></tr>
@@ -1210,11 +1221,11 @@ function meProfile() {
         <tr><td>Tagesziel</td><td>+${XP.dayGoal}</td></tr>
         <tr><td>Wochenziel</td><td>+${XP.weekGoal}</td></tr>
       </tbody></table>
-      <p class="muted small">Es gibt nie Abzüge. XP gibt es für Gewohnheiten, nicht für Noten. Rätsel geben keine XP, dafür Sticker.</p>
+      <p class="muted small">Es gibt nie Abzüge. XP gibt es für Gewohnheiten, nicht für Noten.${extrasOn() ? ' Rätsel geben keine XP, dafür Sticker.' : ''}</p>
     </details>
     <details class="card fold">
       <summary><h2>Zuletzt bekommen</h2></summary>
-      <div class="log">${S.log.slice(0, 15).map(l => `<div><span>${esc(l.r)} · ${fmtDate(l.d, false)}</span><b>+${l.a}</b></div>`).join('') || '<p class="empty">Noch keine XP. Fang mit dem Ranzen-Check an.</p>'}</div>
+      <div class="log">${S.log.slice(0, 15).map(l => `<div><span>${esc(l.r)} · ${fmtDate(l.d, false)}</span><b>+${l.a}</b></div>`).join('') || '<p class="empty">Noch keine XP. Hak deine erste Hausaufgabe ab.</p>'}</div>
     </details>`;
 }
 
@@ -1271,7 +1282,7 @@ function meGames() {
     <section class="card daily ${solved ? 'solved' : rec.goal ? 'ready' : 'locked'}">
       <div class="card-head"><span class="label">Tagesrätsel</span><span class="tag ${solved ? 'ok' : ''}">${solved ? 'gelöst' : rec.goal ? 'frei' : 'gesperrt'}</span></div>
       <div class="reward-row">${stickerSVG(g.id, 52)}<div><h2>${esc(g.name)}</h2>
-        <p class="muted small">${solved ? 'Heute schon gelöst. Der Sticker klebt im Album.' : rec.goal ? 'Tagesziel geschafft. Löse das Rätsel und hol dir den Sticker.' : 'Öffnet sich mit dem Tagesziel: Ranzen gepackt und alles bis zum nächsten Schultag erledigt.'}</p></div></div>
+        <p class="muted small">${solved ? 'Heute schon gelöst. Der Sticker klebt im Album.' : rec.goal ? 'Tagesziel geschafft. Löse das Rätsel und hol dir den Sticker.' : `Öffnet sich mit dem Tagesziel: ${ranzenOn() ? 'Tasche gepackt und ' : ''}alles bis zum nächsten Schultag erledigt.`}</p></div></div>
       ${!solved && rec.goal ? `<div class="row"><button class="btn primary" data-action="daily-start">Rätsel starten</button></div>` : ''}
     </section>
     <section class="card">${albumHTML()}</section>
@@ -1294,6 +1305,11 @@ function meSettings() {
       <label class="field">Ab wann zeigt „Heute“ schon den nächsten Schultag?
         <select data-action="set-hour">${[12, 13, 14, 15, 16, 17].map(h => `<option value="${h}" ${h === S.settings.afterSchoolHour ? 'selected' : ''}>ab ${h}:00 Uhr</option>`).join('')}</select>
       </label>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Funktionen</h2></div>
+      <label class="field toggle"><input type="checkbox" data-action="set-feature" data-feature="ranzen" ${ranzenOn() ? 'checked' : ''}> Taschen-Check: zeigt, was für den nächsten Schultag eingepackt werden muss</label>
+      <label class="field toggle"><input type="checkbox" data-action="set-feature" data-feature="extras" ${extrasOn() ? 'checked' : ''}> Werkstatt und Rätsel: Roboter gestalten, Tagesrätsel, Sticker und Spielecke</label>
     </section>
     <section class="card">
       <div class="card-head"><h2>Ferien</h2><button class="btn small" data-action="holiday-new">+ Ferien</button></div>
@@ -1382,7 +1398,7 @@ function syncStatusText() {
 function applySync(data) {
   const today = todayISO();
   S.sync = { updated: data.updated, fetchedAt: Date.now(), lessons: data.lessons || [], errors: data.errors || [], debug: data.debug || null };
-  // Fächer aus WebUntis, die die App noch nicht kennt, automatisch anlegen (Ranzen-Sachen kann Paul unter „Plan“ ergänzen)
+  // Fächer aus WebUntis, die die App noch nicht kennt, automatisch anlegen (Taschen-Sachen lassen sich unter „Plan“ ergänzen)
   (data.lessons || []).forEach(l => {
     if (l.subject && !matchSubject(l.subject, l.short)) {
       S.subjects.push({ id: uid(), name: l.subject, short: l.short || '', color: COLORS[S.subjects.length % COLORS.length], items: [] });
@@ -1559,7 +1575,9 @@ document.addEventListener('change', ev => {
   const action = el.dataset && el.dataset.action;
   if (!action) return;
   if (action === 'set-name') {
-    S.settings.name = el.value.trim() || 'du'; save(); render();
+    S.settings.name = el.value.trim(); save(); render();
+  } else if (action === 'set-feature') {
+    S.settings[el.dataset.feature] = el.checked; checkBadges(); save(); render();
   } else if (action === 'set-hour') {
     S.settings.afterSchoolHour = Number(el.value); save(); render();
   } else if (action === 'set-sync-url') {
