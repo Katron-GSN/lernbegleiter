@@ -7,3 +7,6 @@ keep_vars = true
 [vars]
 ALLOWED_ORIGIN = "https://katron-gsn.github.io"
 UNTIS_SERVER = "gsnpb.webuntis.com"
+
+# Vorschau-Builds für andere Branches als main erlauben (sonst schlägt "wrangler preview" fehl)
+[previews]
