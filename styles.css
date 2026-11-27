@@ -363,3 +363,11 @@ dialog form { display: grid; gap: 14px; }
 .actions .chooser { display: contents; }
 .actions .pick-list { flex-basis: 100%; }
 @media (max-width: 480px) { .hw .pill { display: none; } }
+
+/* Lernplan */
+.plan-list { gap: 6px; max-height: 40vh; overflow: auto; }
+.plan-row { display: flex; align-items: center; gap: 10px; font-size: .92rem; }
+.plan-row .tag { min-width: 62px; text-align: center; }
+.plan-row.done span:not(.tag) { text-decoration: line-through; color: var(--muted); }
+.plan-row svg { margin-left: auto; color: var(--good, #34d399); }
+@media (max-width: 520px) { .event { grid-template-columns: 58px minmax(0, 1fr); } .event > .row { grid-column: 1 / -1; justify-content: flex-end; flex-wrap: wrap; } }

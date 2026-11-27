@@ -6,7 +6,7 @@ Alle Daten bleiben lokal auf dem Gerät. Die **Schulanbindung** holt Stundenplan
 
 - **Heute:** Spruch des Tages, Briefing zum Lesen und Vorlesen, „Als Nächstes“ mit genau einer Aufgabe, Tagesziel-Leiste, Stundenplan, Taschen-Check (optional), Hausaufgaben, Termine
 - **Aufgaben:** Hausaufgaben eintragen und abhaken
-- **Termine:** eigener Schulkalender für Klassenarbeiten, Tests und Abgaben mit Countdown
+- **Termine:** eigener Schulkalender für Klassenarbeiten, Tests, Prüfungen (z. B. ZP10) und Abgaben mit Countdown. Für Arbeiten, Tests und Prüfungen gibt es einen **Lernplan**: Themen eintragen, die App verteilt Lerneinheiten, Wiederholungen und einen Probedurchlauf rückwärts vom Termin aus. Die Einheiten erscheinen als Aufgaben und geben XP wie Hausaufgaben.
 - **Plan:** Wochen-Stundenplan aus WebUntis, Fächer mit Farben
 - **Ich → Profil:** Level, Serie mit Joker, Bestwert, Abzeichen
 - **Ich → Werkstatt:** 56 freischaltbare Teile in acht Gruppen, darunter Begleiter, Hintergrund-Räume, Titel und die Akzentfarbe der ganzen App
