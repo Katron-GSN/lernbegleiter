@@ -88,7 +88,8 @@ function defaultState() {
       syncKey: '',
       avatar: 'm-gruen',
       logo: '',
-      henneUrl: ''
+      henneUrl: '',
+      henneToken: ''
     },
     sync: null,
     subjects,
@@ -1346,6 +1347,105 @@ function viewExams() {
   </div>`;
 }
 
+/* ---------- ZP-Henne: Fortschritt aus dem Mathe-Training lesen ----------
+ * Die ZP-Henne speichert den Stand in ihrer Supabase-Datenbank. Mit Bens persönlichem Zugang (?k=… aus seinem Link)
+ * liest der Lernbegleiter nur seinen eigenen Stand über dieselbe Datenbankfunktion wie die ZP-Henne selbst.
+ * Der Schlüssel bleibt auf diesem Gerät. Der Publishable Key ist öffentlich und steht auch in der ZP-Henne. */
+const HENNE_DB = 'https://mhofhvkdhtwujjpazzpy.supabase.co';
+const HENNE_KEY = 'sb_publishable_KtXVSt6W-VrnPoqeHa0Gew_PKabhMi1';
+const HENNE_STARS = [5, 15, 30];
+const HENNE_LEVELS = [[0, 'Ei'], [50, 'Küken'], [150, 'Junghenne'], [300, 'Henne'], [500, 'Super-Henne'], [800, 'Gold-Henne'], [1200, 'ZP-Legende']];
+const HENNE_EVERY_MS = 10 * 60 * 1000;
+let henneLoading = false;
+
+function parseHenneLink(text) {
+  try {
+    const u = new URL(String(text).trim());
+    const k = u.searchParams.get('k');
+    if (u.protocol !== 'https:' || !k || !/^[a-f0-9]{32,128}$/i.test(k)) return null;
+    return { url: u.origin + u.pathname, token: k };
+  } catch { return null; }
+}
+const henneLink = () => S.settings.henneToken ? `${S.settings.henneUrl || ''}?k=${S.settings.henneToken}` : S.settings.henneUrl;
+
+async function henneFetch(path, body) {
+  const res = await fetch(HENNE_DB + path, {
+    method: body ? 'POST' : 'GET',
+    headers: { apikey: HENNE_KEY, 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error((data && (data.message || data.hint)) || 'HTTP ' + res.status);
+  return data;
+}
+
+async function henneSync(manual) {
+  if (!S.settings.henneToken || henneLoading) return;
+  henneLoading = true; if (manual) render();
+  try {
+    const [state, topics] = await Promise.all([
+      henneFetch('/rest/v1/rpc/student_get_state', { p_token: S.settings.henneToken }),
+      henneFetch('/rest/v1/topics?select=id,title&order=sort_order')
+    ]);
+    S.henne = { fetchedAt: Date.now(), state, topics: topics || [], error: null };
+    if (manual) toast('ZP-Henne aktualisiert');
+  } catch (e) {
+    const msg = /invalid_token/.test(String(e.message)) ? 'Der ZP-Henne-Link ist nicht mehr gültig. Bitte den aktuellen Link eintragen.' : 'ZP-Henne nicht erreichbar: ' + e.message;
+    S.henne = { ...(S.henne || {}), error: msg, fetchedAt: Date.now() };
+    if (manual) toast(msg);
+  }
+  henneLoading = false;
+  save(); render();
+}
+function henneAuto() {
+  if (S.settings.henneToken && navigator.onLine && (!S.henne || Date.now() - (S.henne.fetchedAt || 0) > HENNE_EVERY_MS)) henneSync(false);
+}
+
+function henneCard() {
+  if (!S.settings.henneToken) {
+    return `<section class="card henne-card">
+      <div class="card-head"><div><span class="label">Mathe-Training</span><h2>🐔 ZP-Henne</h2></div></div>
+      <p class="small">Trag in den Einstellungen Bens persönlichen ZP-Henne-Link ein. Dann steht hier, was er dort schon geschafft hat, und der Knopf führt direkt in sein Training.</p>
+      ${S.settings.henneUrl ? `<a class="btn" href="${esc(S.settings.henneUrl)}" target="_blank" rel="noopener">ZP-Henne öffnen</a>` : ''}
+    </section>`;
+  }
+  const h = S.henne || {};
+  const st = h.state;
+  const title = id => ((h.topics || []).find(t => t.id === id) || {}).title || id;
+  const prog = (st && st.progress) || [];
+  const assigned = new Set(((st && st.assignments) || []).map(a => a.topic_id));
+  const rows = prog.filter(p => p.topic_id !== 'zp-probe');
+  const topicIds = (h.topics || []).map(t => t.id).filter(id => id !== 'zp-probe');
+  const allIds = [...new Set([...topicIds, ...rows.map(p => p.topic_id)])];
+  const starsOf = c => HENNE_STARS.filter(s => c >= s).length;
+  const probe = prog.find(p => p.topic_id === 'zp-probe');
+  let lvl = HENNE_LEVELS[0];
+  if (st) HENNE_LEVELS.forEach(l => { if ((st.xp || 0) >= l[0]) lvl = l; });
+  const totalStars = allIds.reduce((n, id) => n + starsOf((prog.find(p => p.topic_id === id) || {}).correct || 0), 0);
+  return `<section class="card henne-card">
+    <div class="card-head">
+      <div><span class="label">Mathe-Training</span><h2>🐔 ZP-Henne</h2></div>
+      <button class="btn small ghost" data-action="henne-sync" ${henneLoading ? 'disabled' : ''}>${henneLoading ? 'Lädt …' : 'Aktualisieren'}</button>
+    </div>
+    ${h.error ? `<p class="small due-late">${esc(h.error)}</p>` : ''}
+    ${st ? `
+      <div class="stats inner">
+        <div class="stat"><div class="v">${st.xp || 0}</div><div class="l">XP · ${esc(lvl[1])}</div></div>
+        <div class="stat"><div class="v">${totalStars}/${allIds.length * 3}</div><div class="l">Sterne</div></div>
+      </div>
+      ${assigned.size ? `<p class="small"><b>Baustellen von der Lehrerin:</b> ${[...assigned].map(id => esc(title(id))).join(', ')}</p>` : ''}
+      <div class="henne-topics">${allIds.map(id => {
+        const p = prog.find(x => x.topic_id === id) || { attempts: 0, correct: 0 };
+        const s = starsOf(p.correct);
+        return `<div class="henne-topic ${assigned.has(id) ? 'assigned' : ''}"><span>${esc(title(id))}</span><span class="henne-stars" aria-label="${s} von 3 Sternen">${'★'.repeat(s)}<span class="off">${'★'.repeat(3 - s)}</span></span><span class="muted small">${p.correct} richtig</span></div>`;
+      }).join('')}</div>
+      <p class="small">${probe && probe.attempts ? `Probeprüfung: ${probe.correct} von ${probe.attempts} Aufgaben richtig` : 'Probeprüfung noch nicht gemacht'}</p>
+      <p class="muted small">Stand ${new Date(h.fetchedAt).toLocaleString('de-DE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>`
+      : `<p class="small">${henneLoading ? 'Hole den Stand …' : 'Noch kein Stand geladen.'}</p>`}
+    <a class="btn primary" href="${esc(henneLink())}" target="_blank" rel="noopener">Weiter üben in der ZP-Henne</a>
+  </section>`;
+}
+
 /* ---------- Ansicht: ZP10 ---------- */
 
 const ZP_LEVELS = ['offen', 'übe ich', 'sitzt'];
@@ -1389,7 +1489,6 @@ function viewZP() {
   const all = zp.subjects.flatMap(s => s.topics);
   const pct = all.length ? Math.round(all.filter(t => t.lvl === 2).length * 100 / all.length) : 0;
   const first = zp.subjects.map(s => s.date).filter(Boolean).sort()[0];
-  const henne = S.settings.henneUrl;
   return `
   <div class="stack">
     <div class="hello">
@@ -1400,10 +1499,8 @@ function viewZP() {
         <div class="stat"><div class="v">${first ? Math.max(0, diffDays(todayISO(), first)) : '–'}</div><div class="l">Tage bis zur ersten Prüfung</div></div>
         <div class="stat"><div class="v">${pct}%</div><div class="l">der Themen sitzen</div></div>
       </div>
-      ${henne ? `<a class="btn primary" href="${esc(henne)}" target="_blank" rel="noopener">🐔 Mit der ZP-Henne üben</a>`
-        : `<p class="muted small">Tipp: In den Einstellungen die Adresse der ZP-Henne eintragen, dann gibt es hier einen Knopf zum Üben.</p>`}
     </section>
-    ${zp.subjects.map(zpCard).join('')}
+    ${zp.subjects.map(z => z.key === 'M' ? henneCard() + zpCard(z) : zpCard(z)).join('')}
     <p class="muted small">Die Themen sind ein Startvorschlag. Gleich sie mit dem ab, was eure Lehrkräfte für die ZP10 angekündigt haben, und ändere sie hier. Tippe auf den Stand, um zwischen „offen“, „übe ich“ und „sitzt“ zu wechseln. Der Lernplan nimmt nur Themen, die noch nicht sitzen.</p>
   </div>`;
 }
@@ -1610,7 +1707,9 @@ function meSettings() {
     </section>
     <section class="card">
       <div class="card-head"><h2>ZP-Henne</h2></div>
-      <label class="field">Adresse der ZP-Henne <input data-action="set-henne" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://katron-gsn.github.io/ZP-Henne/" value="${esc(S.settings.henneUrl)}"></label>
+      <label class="field">Persönlicher ZP-Henne-Link <input data-action="set-henne" type="password" inputmode="url" autocapitalize="off" autocorrect="off" autocomplete="off" placeholder="https://…/?k=…" value="${esc(henneLink() || '')}"></label>
+      <p class="muted small">Den Link mit <code>?k=</code> gibt es von der Mathelehrerin oder auf der Zugangskarte (QR-Code). Er ist ein persönlicher Schlüssel und bleibt nur auf diesem Gerät. Ohne <code>?k=</code> gibt es nur einen Knopf zur ZP-Henne, aber keinen Fortschritt.</p>
+      ${S.settings.henneToken ? `<div class="row"><button class="btn small ghost" data-action="henne-remove">Link entfernen</button></div>` : ''}
     </section>
     <section class="card">
       <div class="card-head"><h2>Funktionen</h2></div>
@@ -1783,6 +1882,7 @@ function render() {
   applyTheme();
   applyBrand();
   document.getElementById('view').innerHTML = VIEWS[current]();
+  if (current === 'zp') henneAuto();
   const tab = current === 'game' ? 'me' : current;
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.go === tab));
 }
@@ -1861,6 +1961,8 @@ document.addEventListener('click', ev => {
     case 'base-edit': openBaseItemsDialog(); break;
     case 'me-tab': meTab = el.dataset.tab; render(); window.scrollTo({ top: 0 }); break;
     case 'avatar-open': openAvatarDialog(); break;
+    case 'henne-sync': henneSync(true); break;
+    case 'henne-remove': S.settings.henneToken = ''; S.henne = null; save(); render(); break;
     case 'avatar-pick': S.settings.avatar = id; save(); render(); dlg.close(); toast('Avatar gewechselt'); break;
     case 'logo-remove': S.settings.logo = ''; save(); render(); break;
     case 'exam-new': openEventDialog(null, 'Klassenarbeit'); break;
@@ -1917,7 +2019,10 @@ document.addEventListener('change', ev => {
   } else if (action === 'set-sync-key') {
     S.settings.syncKey = el.value.trim(); save(); render(); autoSync();
   } else if (action === 'set-henne') {
-    S.settings.henneUrl = /^https:\/\//.test(el.value.trim()) ? el.value.trim() : ''; save(); render();
+    const v = el.value.trim();
+    const link = parseHenneLink(v);
+    if (link) { S.settings.henneUrl = link.url; S.settings.henneToken = link.token; S.henne = null; save(); render(); henneSync(true); }
+    else { S.settings.henneUrl = /^https:\/\//.test(v) ? v : ''; S.settings.henneToken = ''; S.henne = null; save(); render(); }
   } else if (action === 'logo' && el.files && el.files[0]) {
     loadLogo(el.files[0]); el.value = '';
   } else if (action === 'zp-date') {
