@@ -371,3 +371,37 @@ dialog form { display: grid; gap: 14px; }
 .plan-row.done span:not(.tag) { text-decoration: line-through; color: var(--muted); }
 .plan-row svg { margin-left: auto; color: var(--good, #34d399); }
 @media (max-width: 520px) { .event { grid-template-columns: 58px minmax(0, 1fr); } .event > .row { grid-column: 1 / -1; justify-content: flex-end; flex-wrap: wrap; } }
+
+/* Logo, Avatar, Prüfungen, ZP10 */
+.brand-mark { display: inline-flex; width: 30px; height: 30px; flex: none; }
+.brand-mark img { width: 30px; height: 30px; object-fit: contain; border-radius: 8px; background: #fff; padding: 2px; }
+.nav-av { display: inline-flex; width: 1.3em; height: 1.3em; vertical-align: middle; }
+.nav-av svg { width: 100%; height: 100%; border-radius: 6px; }
+.nav-av .emoji-av { font-size: 1em; width: auto; height: auto; background: none; border-radius: 0; }
+.emoji-av { display: grid; place-items: center; width: 100%; aspect-ratio: 1; font-size: clamp(3rem, 14vw, 6.5rem); line-height: 1; background: radial-gradient(circle at 50% 35%, rgba(255,255,255,.14), #1b1638 70%); border-radius: 28px; }
+.av-btn { border: 0; background: none; padding: 0; cursor: pointer; width: 100%; max-width: 220px; justify-self: center; }
+.av-group { margin: 14px 0 6px; font-size: .9rem; color: var(--muted); }
+.av-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; }
+.av-opt { border: 2px solid transparent; background: var(--inset); border-radius: 18px; padding: 4px; cursor: pointer; }
+.av-opt.on { border-color: var(--accent); }
+.av-opt svg { width: 100%; display: block; border-radius: 14px; }
+.av-opt .emoji-av { font-size: 2.2rem; border-radius: 14px; }
+#dialog .av-grid + .av-group { margin-top: 16px; }
+.exam-card .bar, .zp-card .bar { margin-top: 4px; }
+.zp-topics { display: grid; gap: 6px; }
+.zp-topic { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 8px; background: var(--inset); border-radius: 12px; }
+.zp-lvl { border: 0; border-radius: 999px; padding: 5px 10px; font-size: .78rem; font-weight: 700; min-width: 70px; cursor: pointer; background: rgba(255,255,255,.08); color: var(--muted); }
+.zp-topic.lvl1 .zp-lvl { background: rgba(250, 204, 21, .18); color: #facc15; }
+.zp-topic.lvl2 .zp-lvl { background: rgba(52, 211, 153, .2); color: #34d399; }
+.zp-topic.lvl2 span { color: var(--muted); }
+.zp-hero .btn { justify-self: start; margin-top: 8px; }
+@media (max-width: 760px) {
+  .tabs { gap: 0; padding: 4px; }
+  .tabs button { padding: 6px 4px; font-size: .62rem; flex: 1 1 0; min-width: 0; }
+  .tabs button b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+}
+@media (min-width: 761px) and (max-width: 1060px) {
+  .brand > span:not(.brand-mark) { display: none; }
+  .tabs { gap: 2px; }
+  .tabs button { padding: 8px 10px; font-size: .86rem; gap: 5px; }
+}

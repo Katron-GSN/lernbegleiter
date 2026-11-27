@@ -85,7 +85,10 @@ function defaultState() {
       baseItems: ['Federmäppchen', 'iPad geladen', 'Trinkflasche'],
       holidays: [],
       syncUrl: '',
-      syncKey: ''
+      syncKey: '',
+      avatar: 'm-gruen',
+      logo: '',
+      henneUrl: ''
     },
     sync: null,
     subjects,
@@ -919,13 +922,13 @@ function viewEvents() {
   </div>`;
 }
 
-function openEventDialog(id) {
+function openEventDialog(id, presetType) {
   const e = id ? S.events.find(x => x.id === id) : null;
   showDialog(`
     <form method="dialog">
       <h2>${e ? 'Termin bearbeiten' : 'Neuer Termin'}</h2>
       <label class="field">Art
-        <select name="type">${EVENT_TYPES.map(t => `<option ${e && e.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <select name="type">${EVENT_TYPES.map(t => `<option ${(e ? e.type : presetType) === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
       </label>
       <label class="field">Fach
         <select name="subject">${subjectOptions(e ? e.subjectId : '')}</select>
@@ -1217,6 +1220,223 @@ function applyTheme() {
   document.documentElement.style.setProperty('--accent2', th.v2 || th.v);
 }
 
+/* ---------- Avatar: Monster, Tiere, MINT ---------- */
+
+const MONSTERS = [
+  { id: 'm-gruen', name: 'Blubb', c: '#34d399', eyes: 1, horns: false },
+  { id: 'm-lila', name: 'Zorg', c: '#a78bfa', eyes: 2, horns: true },
+  { id: 'm-blau', name: 'Quax', c: '#60a5fa', eyes: 3, horns: false },
+  { id: 'm-orange', name: 'Rumms', c: '#fb923c', eyes: 2, horns: false, teeth: true },
+  { id: 'm-pink', name: 'Fluff', c: '#f472b6', eyes: 1, horns: true },
+  { id: 'm-gelb', name: 'Zapp', c: '#facc15', eyes: 2, horns: true, teeth: true },
+  { id: 'm-rot', name: 'Grumm', c: '#f87171', eyes: 3, horns: true },
+  { id: 'm-tuerkis', name: 'Glibb', c: '#22d3ee', eyes: 2, horns: false }
+];
+const AVATAR_GROUPS = [
+  ['Monster', MONSTERS.map(m => ({ id: m.id, name: m.name }))],
+  ['Tiere', [['a-fuchs', '🦊', 'Fuchs'], ['a-wolf', '🐺', 'Wolf'], ['a-eule', '🦉', 'Eule'], ['a-krake', '🐙', 'Krake'], ['a-echse', '🦎', 'Echse'], ['a-hai', '🦈', 'Hai'], ['a-pinguin', '🐧', 'Pinguin'], ['a-tiger', '🐯', 'Tiger'], ['a-axolotl', '🦎', 'Axolotl'], ['a-faultier', '🦥', 'Faultier']].filter((x, i, a) => a.findIndex(y => y[1] === x[1]) === i).map(([id, e, name]) => ({ id, e, name }))],
+  ['MINT', [['n-atom', '⚛️', 'Atom'], ['n-dna', '🧬', 'DNA'], ['n-mikroskop', '🔬', 'Mikroskop'], ['n-reagenz', '🧪', 'Reagenzglas'], ['n-teleskop', '🔭', 'Teleskop'], ['n-planet', '🪐', 'Planet'], ['n-magnet', '🧲', 'Magnet'], ['n-mikrobe', '🦠', 'Mikrobe'], ['n-vulkan', '🌋', 'Vulkan'], ['n-dino', '🦕', 'Dino'], ['n-satellit', '🛰️', 'Satellit'], ['n-rakete', '🚀', 'Rakete'], ['n-gluehbirne', '💡', 'Idee'], ['n-zirkel', '📐', 'Geometrie']].map(([id, e, name]) => ({ id, e, name }))]
+];
+const avatarById = id => AVATAR_GROUPS.flatMap(g => g[1]).find(a => a.id === id);
+const currentAvatar = () => S.settings.avatar === 'robot' && extrasOn() ? 'robot' : (avatarById(S.settings.avatar) ? S.settings.avatar : MONSTERS[0].id);
+
+function monsterSVG(m, idp = 'm') {
+  const eyeX = { 1: [50], 2: [38, 62], 3: [32, 50, 68] }[m.eyes];
+  const r = m.eyes === 1 ? 13 : m.eyes === 2 ? 10 : 8;
+  return `<svg viewBox="0 0 100 100" role="img" aria-label="Monster ${esc(m.name)}">
+    <defs><radialGradient id="${idp}-bg" cx=".5" cy=".35" r=".8"><stop offset="0" stop-color="${m.c}" stop-opacity=".35"/><stop offset="1" stop-color="#151230" stop-opacity="0"/></radialGradient></defs>
+    <rect width="100" height="100" rx="24" fill="#1b1638"/><rect width="100" height="100" rx="24" fill="url(#${idp}-bg)"/>
+    ${m.horns ? `<path d="M30 32 L24 12 L40 27 Z M70 32 L76 12 L60 27 Z" fill="${m.c}" stroke="#0c0a1d" stroke-opacity=".25" stroke-width="1.5"/>` : `<circle cx="50" cy="16" r="5" fill="${m.c}"/><path d="M50 21 V28" stroke="${m.c}" stroke-width="3"/>`}
+    <path d="M20 58 C20 34 32 26 50 26 C68 26 80 34 80 58 L80 84 L72 78 L64 86 L56 78 L50 86 L44 78 L36 86 L28 78 L20 84 Z" fill="${m.c}"/>
+    <path d="M28 40 C33 33 40 31 46 31" stroke="#fff" stroke-opacity=".35" stroke-width="3" fill="none" stroke-linecap="round"/>
+    ${eyeX.map(x => `<circle cx="${x}" cy="50" r="${r}" fill="#fff"/><circle cx="${x + 2}" cy="52" r="${r * .5}" fill="#0c0a1d"/>`).join('')}
+    <path d="M38 68 Q50 76 62 68" stroke="#0c0a1d" stroke-width="3" fill="none" stroke-linecap="round"/>
+    ${m.teeth ? `<path d="M43 70 l3 5 l3 -4 M51 71 l3 4 l3 -5" stroke="#fff" stroke-width="2" fill="#fff" stroke-linejoin="round"/>` : ''}
+  </svg>`;
+}
+
+function avatarHTML(id = currentAvatar(), idp = 'av') {
+  if (id === 'robot') return robotSVG(S.equipped, idp);
+  const m = MONSTERS.find(x => x.id === id);
+  if (m) return monsterSVG(m, idp);
+  const a = avatarById(id);
+  return `<span class="emoji-av" role="img" aria-label="${esc(a ? a.name : 'Avatar')}">${a ? a.e : '🙂'}</span>`;
+}
+
+function openAvatarDialog() {
+  const cur = currentAvatar();
+  const groups = extrasOn() ? [...AVATAR_GROUPS, ['Werkstatt', [{ id: 'robot', name: 'Roboter' }]]] : AVATAR_GROUPS;
+  showDialog(`
+    <form method="dialog">
+      <h2>Avatar wählen</h2>
+      ${groups.map(([title, list]) => `<h3 class="av-group">${esc(title)}</h3>
+        <div class="av-grid">${list.map(a => `<button type="button" class="av-opt ${a.id === cur ? 'on' : ''}" data-action="avatar-pick" data-id="${esc(a.id)}" aria-label="${esc(a.name)}" title="${esc(a.name)}">${avatarHTML(a.id, 'pick-' + a.id)}</button>`).join('')}</div>`).join('')}
+      <div class="row end"><button type="button" class="btn ghost" data-close>Fertig</button></div>
+    </form>`, () => true);
+}
+
+/* ---------- Schullogo (nur auf diesem Gerät gespeichert) ---------- */
+
+function loadLogo(file) {
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    const max = 160;
+    const k = Math.min(1, max / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    S.settings.logo = c.toDataURL('image/png');
+    URL.revokeObjectURL(url);
+    save(); render(); toast('Logo gespeichert');
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); toast('Dieses Bild lässt sich nicht lesen'); };
+  img.src = url;
+}
+
+function applyBrand() {
+  const box = document.getElementById('brand-mark');
+  if (box) box.innerHTML = S.settings.logo ? `<img src="${esc(S.settings.logo)}" alt="Schullogo">` : BRAND_DEFAULT;
+  const me = document.querySelector('.tabs [data-go="me"] span');
+  if (me) me.innerHTML = `<span class="nav-av">${avatarHTML(currentAvatar(), 'nav')}</span>`;
+}
+const BRAND_DEFAULT = '<svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="9" fill="url(#brandgrad)"/><rect x="7" y="9" width="16" height="12" rx="4" fill="#1b1030"/><circle cx="12" cy="15" r="1.8" fill="#ffc247"/><circle cx="18" cy="15" r="1.8" fill="#ffc247"/></svg>';
+
+/* ---------- Ansicht: Prüfungsvorbereitung (Klassenarbeiten, Tests) ---------- */
+
+function planProgress(e) {
+  const items = planItems(e.id);
+  const done = items.filter(h => h.doneAt).length;
+  return { items, done, pct: items.length ? Math.round(done * 100 / items.length) : 0 };
+}
+
+function examCard(e) {
+  const s = subjectById(e.subjectId);
+  const p = planProgress(e);
+  const nextItem = p.items.filter(h => !h.doneAt).sort((a, b) => a.due.localeCompare(b.due))[0];
+  return `<section class="card exam-card">
+    <div class="card-head">
+      <div><span class="label">${esc(e.type)} · ${fmtDate(e.date)}</span><h2>${subjectDot(s)} ${esc(s ? s.name : 'Ohne Fach')}</h2></div>
+      ${countdownBadge(e.date)}
+    </div>
+    <p class="muted small">${esc(e.topic || 'Kein Thema eingetragen')}</p>
+    ${p.items.length ? `<div class="bar"><span style="width:${p.pct}%"></span></div>
+      <p class="small">${p.done} von ${p.items.length} Lerneinheiten erledigt${nextItem ? ` · als Nächstes ${esc(relDay(nextItem.due))}: ${esc(nextItem.text.replace(/^[^:]*: /, ''))}` : ' · alles geschafft'}</p>`
+      : `<p class="small">Noch kein Lernplan. Mit Plan verteilt die App die Themen auf die Tage vor dem Termin.</p>`}
+    <div class="row">${planButton(e)}<button class="btn small ghost" data-action="ev-edit" data-id="${esc(e.id)}">Bearbeiten</button></div>
+  </section>`;
+}
+
+function viewExams() {
+  const today = todayISO();
+  const list = S.events.filter(e => isExam(e) && !e.zp && e.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+  const open = S.homework.filter(h => h.plan && !h.doneAt && S.events.some(e => e.id === h.plan && !e.zp)).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 5);
+  return `
+  <div class="stack">
+    <div class="hello">
+      <div><span class="label">Klassenarbeiten und Tests</span><h1>Prüfungsvorbereitung</h1></div>
+      <button class="btn primary" data-action="exam-new">+ Arbeit eintragen</button>
+    </div>
+    ${open.length ? `<section class="card">
+      <div class="card-head"><h2>Nächste Lerneinheiten</h2></div>
+      <div class="list">${open.map(hwRow).join('')}</div>
+    </section>` : ''}
+    ${list.length ? list.map(examCard).join('') : `<section class="card"><p class="empty">Keine Arbeit in Sicht. Sobald eine angekündigt wird: eintragen und einen Lernplan machen lassen.</p></section>`}
+    <p class="muted small">Ein Lernplan verteilt pro Thema eine Lerneinheit, dazu Wiederholungen und am Ende einen Probedurchlauf. Die Einheiten stehen auch unter „Heute“ und geben XP.</p>
+  </div>`;
+}
+
+/* ---------- Ansicht: ZP10 ---------- */
+
+const ZP_LEVELS = ['offen', 'übe ich', 'sitzt'];
+const ZP_DEFAULT = [
+  ['D', 'Deutsch', ['Leseverstehen', 'Sachtext analysieren', 'Literarischen Text analysieren', 'Argumentieren und Stellung nehmen', 'Rechtschreibung und Zeichensetzung']],
+  ['E', 'Englisch', ['Listening', 'Reading', 'Writing', 'Mediation']],
+  ['M', 'Mathe', ['Terme und Gleichungen', 'Lineare und quadratische Funktionen', 'Exponentielles Wachstum', 'Geometrie und Trigonometrie', 'Wahrscheinlichkeit und Statistik']]
+];
+function zpState() {
+  if (!S.zp10) S.zp10 = { subjects: ZP_DEFAULT.map(([key, name, topics]) => ({ key, name, date: '', topics: topics.map(t => ({ id: uid(), text: t, lvl: 0 })) })) };
+  return S.zp10;
+}
+const zpSubject = key => zpState().subjects.find(s => s.key === key);
+
+function zpCard(z) {
+  const sitzt = z.topics.filter(t => t.lvl === 2).length;
+  const pct = z.topics.length ? Math.round(sitzt * 100 / z.topics.length) : 0;
+  const ev = z.eventId && S.events.find(e => e.id === z.eventId);
+  return `<section class="card zp-card">
+    <div class="card-head">
+      <div><span class="label">ZP10</span><h2>${esc(z.name)}</h2></div>
+      ${z.date ? countdownBadge(z.date) : '<span class="tag">Datum fehlt</span>'}
+    </div>
+    <label class="field">Prüfungstag <input type="date" data-action="zp-date" data-key="${esc(z.key)}" value="${esc(z.date)}"></label>
+    <div class="bar"><span style="width:${pct}%"></span></div>
+    <p class="small">${sitzt} von ${z.topics.length} Themen sitzen</p>
+    <div class="zp-topics">${z.topics.map(t => `<div class="zp-topic lvl${t.lvl}">
+      <button class="zp-lvl" data-action="zp-level" data-key="${esc(z.key)}" data-id="${esc(t.id)}" aria-label="Stand ändern, gerade: ${ZP_LEVELS[t.lvl]}">${ZP_LEVELS[t.lvl]}</button>
+      <span>${esc(t.text)}</span>
+      <button class="icon-btn" data-action="zp-del" data-key="${esc(z.key)}" data-id="${esc(t.id)}" aria-label="Thema löschen">✕</button>
+    </div>`).join('')}</div>
+    <div class="row">
+      <button class="btn small" data-action="zp-add" data-key="${esc(z.key)}">+ Thema</button>
+      <button class="btn small ${ev && planItems(ev.id).length ? 'ghost' : 'primary'}" data-action="zp-plan" data-key="${esc(z.key)}" ${z.date ? '' : 'disabled'}>${ev && planItems(ev.id).length ? `Lernplan ${planProgress(ev).done}/${planItems(ev.id).length}` : 'Lernplan erstellen'}</button>
+    </div>
+  </section>`;
+}
+
+function viewZP() {
+  const zp = zpState();
+  const all = zp.subjects.flatMap(s => s.topics);
+  const pct = all.length ? Math.round(all.filter(t => t.lvl === 2).length * 100 / all.length) : 0;
+  const first = zp.subjects.map(s => s.date).filter(Boolean).sort()[0];
+  const henne = S.settings.henneUrl;
+  return `
+  <div class="stack">
+    <div class="hello">
+      <div><span class="label">Zentrale Prüfungen Klasse 10</span><h1>ZP10-Vorbereitung</h1></div>
+    </div>
+    <section class="card zp-hero">
+      <div class="stats inner">
+        <div class="stat"><div class="v">${first ? Math.max(0, diffDays(todayISO(), first)) : '–'}</div><div class="l">Tage bis zur ersten Prüfung</div></div>
+        <div class="stat"><div class="v">${pct}%</div><div class="l">der Themen sitzen</div></div>
+      </div>
+      ${henne ? `<a class="btn primary" href="${esc(henne)}" target="_blank" rel="noopener">🐔 Mit der ZP-Henne üben</a>`
+        : `<p class="muted small">Tipp: In den Einstellungen die Adresse der ZP-Henne eintragen, dann gibt es hier einen Knopf zum Üben.</p>`}
+    </section>
+    ${zp.subjects.map(zpCard).join('')}
+    <p class="muted small">Die Themen sind ein Startvorschlag. Gleich sie mit dem ab, was eure Lehrkräfte für die ZP10 angekündigt haben, und ändere sie hier. Tippe auf den Stand, um zwischen „offen“, „übe ich“ und „sitzt“ zu wechseln. Der Lernplan nimmt nur Themen, die noch nicht sitzen.</p>
+  </div>`;
+}
+
+function zpPlan(key) {
+  const z = zpSubject(key);
+  if (!z || !z.date) return;
+  const subj = S.subjects.find(s => s.name.toLowerCase() === z.name.toLowerCase());
+  let ev = z.eventId && S.events.find(e => e.id === z.eventId);
+  if (!ev) { ev = { id: uid(), type: 'Prüfung', subjectId: subj ? subj.id : '', date: z.date, topic: 'ZP10', zp: true }; S.events.push(ev); z.eventId = ev.id; }
+  ev.date = z.date;
+  const topics = z.topics.filter(t => t.lvl < 2).map(t => t.text);
+  ev.plan = { topics: topics.length ? topics : (ev.plan ? ev.plan.topics : []), weekend: ev.plan ? ev.plan.weekend : false };
+  save();
+  openPlanDialog(ev.id);
+}
+
+function zpAddTopic(key) {
+  const z = zpSubject(key);
+  showDialog(`
+    <form method="dialog">
+      <h2>Thema für ${esc(z.name)}</h2>
+      <label class="field">Thema <input name="t" required placeholder="z. B. Sachtext zusammenfassen"></label>
+      <div class="row end"><button type="button" class="btn ghost" data-close>Abbrechen</button><button class="btn primary" value="ok">Hinzufügen</button></div>
+    </form>`, form => {
+    const t = String(new FormData(form).get('t') || '').trim();
+    if (!t) return false;
+    z.topics.push({ id: uid(), text: t, lvl: 0 });
+    save(); render();
+    return true;
+  });
+}
+
 /* ---------- Ansicht: Ich ---------- */
 
 let meTab = 'profil';
@@ -1252,14 +1472,14 @@ function meProfile() {
   const earned = badges.filter(b => S.badges[b.id]).length;
   return `
     <section class="card profile">
-      <div class="avatar">${robotSVG(S.equipped, 'p')}</div>
+      <button class="avatar av-btn" data-action="avatar-open" aria-label="Avatar wählen">${avatarHTML(currentAvatar(), 'p')}</button>
       <div class="profile-info">
         <span class="label">${esc(equippedOf('title').name)}</span>
         <h1>${esc(S.settings.name || 'Profil')}</h1>
         <div class="lvl-row"><b>Level ${lv.lvl}</b><span class="muted">${S.xp} XP</span></div>
         <div class="bar"><span style="width:${lv.pct}%"></span></div>
         <p class="muted small">Noch ${lv.to - S.xp} XP bis Level ${lv.lvl + 1}${next && next.lvl === lv.lvl + 1 ? ' · dann neu: ' + esc(next.names.join(', ')) : ''}</p>
-        ${extrasOn() ? `<button class="btn small" data-action="me-tab" data-tab="werkstatt">Roboter anpassen</button>` : ''}
+        <div class="row tight"><button class="btn small" data-action="avatar-open">Avatar wählen</button>${extrasOn() ? `<button class="btn small ghost" data-action="me-tab" data-tab="werkstatt">Roboter anpassen</button>` : ''}</div>
       </div>
     </section>
 
@@ -1378,6 +1598,19 @@ function meSettings() {
       <label class="field">Ab wann zeigt „Heute“ schon den nächsten Schultag?
         <select data-action="set-hour">${[12, 13, 14, 15, 16, 17].map(h => `<option value="${h}" ${h === S.settings.afterSchoolHour ? 'selected' : ''}>ab ${h}:00 Uhr</option>`).join('')}</select>
       </label>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Aussehen</h2></div>
+      <div class="row">
+        <button class="btn" data-action="avatar-open">Avatar wählen</button>
+        <label class="btn" style="display:inline-flex;align-items:center">${S.settings.logo ? 'Anderes Logo' : 'Schullogo hinzufügen'}<input type="file" accept="image/*" data-action="logo" hidden></label>
+        ${S.settings.logo ? `<button class="btn ghost" data-action="logo-remove">Logo entfernen</button>` : ''}
+      </div>
+      <p class="muted small">Das Logo bleibt nur auf diesem Gerät und landet nicht im öffentlichen Repo.</p>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>ZP-Henne</h2></div>
+      <label class="field">Adresse der ZP-Henne <input data-action="set-henne" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://katron-gsn.github.io/ZP-Henne/" value="${esc(S.settings.henneUrl)}"></label>
     </section>
     <section class="card">
       <div class="card-head"><h2>Funktionen</h2></div>
@@ -1539,7 +1772,7 @@ function showDialog(html, onSubmit) {
 
 /* ---------- Routing und Ereignisse ---------- */
 
-const VIEWS = { today: viewToday, homework: viewHomework, events: viewEvents, plan: viewPlan, me: viewMe, game: viewGame };
+const VIEWS = { today: viewToday, homework: viewHomework, events: viewEvents, exams: viewExams, zp: viewZP, plan: viewPlan, me: viewMe, game: viewGame };
 let current = (location.hash || '#today').slice(1);
 if (!VIEWS[current] || current === 'game') current = 'today';
 
@@ -1548,6 +1781,7 @@ function render() {
   const st = streakInfo();
   if (st.count > (S.bestStreak || 0)) { S.bestStreak = st.count; checkBadges(); save(); }
   applyTheme();
+  applyBrand();
   document.getElementById('view').innerHTML = VIEWS[current]();
   const tab = current === 'game' ? 'me' : current;
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.go === tab));
@@ -1626,6 +1860,22 @@ document.addEventListener('click', ev => {
       break;
     case 'base-edit': openBaseItemsDialog(); break;
     case 'me-tab': meTab = el.dataset.tab; render(); window.scrollTo({ top: 0 }); break;
+    case 'avatar-open': openAvatarDialog(); break;
+    case 'avatar-pick': S.settings.avatar = id; save(); render(); dlg.close(); toast('Avatar gewechselt'); break;
+    case 'logo-remove': S.settings.logo = ''; save(); render(); break;
+    case 'exam-new': openEventDialog(null, 'Klassenarbeit'); break;
+    case 'zp-plan': zpPlan(el.dataset.key); break;
+    case 'zp-add': zpAddTopic(el.dataset.key); break;
+    case 'zp-level': {
+      const t = zpSubject(el.dataset.key)?.topics.find(x => x.id === id);
+      if (t) { t.lvl = (t.lvl + 1) % 3; save(); render(); }
+      break;
+    }
+    case 'zp-del': {
+      const z = zpSubject(el.dataset.key);
+      if (z) { z.topics = z.topics.filter(x => x.id !== id); save(); render(); }
+      break;
+    }
     case 'shop-cat': shopCat = el.dataset.cat; render(); break;
     case 'equip': {
       const c = cosmetic(id);
@@ -1666,6 +1916,18 @@ document.addEventListener('change', ev => {
     S.settings.syncUrl = el.value.trim(); save(); render();
   } else if (action === 'set-sync-key') {
     S.settings.syncKey = el.value.trim(); save(); render(); autoSync();
+  } else if (action === 'set-henne') {
+    S.settings.henneUrl = /^https:\/\//.test(el.value.trim()) ? el.value.trim() : ''; save(); render();
+  } else if (action === 'logo' && el.files && el.files[0]) {
+    loadLogo(el.files[0]); el.value = '';
+  } else if (action === 'zp-date') {
+    const z = zpSubject(el.dataset.key);
+    if (z) {
+      z.date = el.value;
+      const ev = z.eventId && S.events.find(e => e.id === z.eventId);
+      if (ev && z.date) ev.date = z.date;
+      save(); render();
+    }
   } else if (action === 'import' && el.files && el.files[0]) {
     importData(el.files[0]); el.value = '';
   }
