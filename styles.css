@@ -405,3 +405,10 @@ dialog form { display: grid; gap: 14px; }
   .tabs { gap: 2px; }
   .tabs button { padding: 8px 10px; font-size: .86rem; gap: 5px; }
 }
+.henne-topics { display: grid; gap: 6px; }
+.henne-topic { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 7px 10px; background: var(--inset); border-radius: 12px; }
+.henne-topic.assigned { box-shadow: inset 3px 0 0 #fb923c; }
+.henne-stars { color: #facc15; letter-spacing: 1px; }
+.henne-stars .off { color: rgba(255,255,255,.18); }
+.henne-card .btn.primary { justify-self: start; }
+a.btn { text-decoration: none; }
