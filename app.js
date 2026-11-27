@@ -1994,7 +1994,14 @@ document.addEventListener('click', ev => {
       save(); render();
       break;
     case 'export': exportData(); break;
-    case 'sync': syncNow(true); break;
+    case 'sync': {
+      const url = document.querySelector('[data-action="set-sync-url"]');
+      const key = document.querySelector('[data-action="set-sync-key"]');
+      if (url) S.settings.syncUrl = url.value.trim();
+      if (key) S.settings.syncKey = key.value.trim();
+      save(); syncNow(true);
+      break;
+    }
     case 'plan-week': {
       const dir = Number(el.dataset.dir);
       planWeekOffset = dir === 0 ? 0 : Math.max(-1, Math.min(1, planWeekOffset + dir));
@@ -2002,6 +2009,17 @@ document.addEventListener('click', ev => {
       break;
     }
   }
+});
+
+// Knopf „Jetzt abrufen“ schon beim Tippen freigeben. Auf dem iPad kommt „change“ erst beim Verlassen des Feldes,
+// und der erste Tipp auf den noch grauen Knopf ginge sonst verloren.
+document.addEventListener('input', ev => {
+  const a = ev.target.dataset && ev.target.dataset.action;
+  if (a !== 'set-sync-url' && a !== 'set-sync-key') return;
+  const url = document.querySelector('[data-action="set-sync-url"]');
+  const key = document.querySelector('[data-action="set-sync-key"]');
+  const btn = document.querySelector('button[data-action="sync"]');
+  if (url && key && btn) btn.disabled = !(url.value.trim() && key.value.trim());
 });
 
 document.addEventListener('change', ev => {
@@ -2015,9 +2033,9 @@ document.addEventListener('change', ev => {
   } else if (action === 'set-hour') {
     S.settings.afterSchoolHour = Number(el.value); save(); render();
   } else if (action === 'set-sync-url') {
-    S.settings.syncUrl = el.value.trim(); save(); render();
+    S.settings.syncUrl = el.value.trim(); save(); // kein render(): sonst springt der Fokus aus dem nächsten Feld
   } else if (action === 'set-sync-key') {
-    S.settings.syncKey = el.value.trim(); save(); render(); autoSync();
+    S.settings.syncKey = el.value.trim(); save(); autoSync();
   } else if (action === 'set-henne') {
     const v = el.value.trim();
     const link = parseHenneLink(v);
