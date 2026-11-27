@@ -145,11 +145,14 @@ async function untis(env, fetchFn, from, to) {
   let bearer = '';
   try {
     const t = await fetchFn(`${base}/api/token/new`, { headers: { Cookie: cookie() } });
-    if (t.ok) bearer = (await t.text()).trim().replace(/^"|"$/g, '');
-    debug.token = !!bearer;
+    const raw = t.ok ? (await t.text()).trim().replace(/^"|"$/g, '') : '';
+    // Nur ein echtes JWT taugt als Token. Liefert WebUntis stattdessen eine HTML-Seite (z. B. die Login-Seite),
+    // wäre der Header ungültig und jede weitere Abfrage würde scheitern.
+    if (/^[\w-]+\.[\w-]+\.[\w-]+$/.test(raw)) bearer = raw;
+    debug.token = bearer ? 'ok' : (t.ok ? (/<html|<!doctype/i.test(raw) ? 'HTML statt token' : 'kein JWT') : `HTTP ${t.status}`);
   } catch { /* optional */ }
   if (!personId) {
-    const found = await webPersonId(base, cookie(), bearer, fetchFn);
+    const found = await webPersonId(base, cookie(), bearer, fetchFn, debug.token);
     personId = found.id;
     debug.personIdSources = found.tried.join(', ');
   }
@@ -247,13 +250,13 @@ export async function webLogin(base, school, schoolCookie, user, password, fetch
 
 /* Schüler-ID nach Web-Anmeldung. WebUntis legt sie je nach Version an verschiedenen Stellen ab,
  * deshalb werden mehrere Quellen probiert. Gibt { id, tried } zurück; tried beschreibt jede Quelle kurz. */
-export async function webPersonId(base, cookieHeader, bearer, fetchFn = fetch) {
+export async function webPersonId(base, cookieHeader, bearer, fetchFn = fetch, tokenInfo = '') {
   const tried = [];
   for (const c of ['person_id', 'personId', 'studentId', 'student_id']) {
     const v = bearer && jwtClaim(bearer, c);
     if (v) return { id: Number(v), tried: ['token:' + c] };
   }
-  tried.push(bearer ? 'token ohne ID' : 'kein token');
+  tried.push(bearer ? 'token ohne ID' : 'kein token' + (tokenInfo ? ': ' + tokenInfo : ''));
   const headers = { Cookie: cookieHeader, Accept: 'application/json' };
   if (bearer) {
     headers.Authorization = 'Bearer ' + bearer;
@@ -279,7 +282,7 @@ export async function webPersonId(base, cookieHeader, bearer, fetchFn = fetch) {
       const id = pick(await res.json().catch(() => null));
       if (id) return { id: Number(id), tried: [...tried, name + ' ok'] };
       tried.push(`${name} ohne ID`);
-    } catch (e) { tried.push(`${name} Fehler`); }
+    } catch (e) { tried.push(`${name} Fehler: ${String(e.message || e).slice(0, 60)}`); }
   }
   return { id: null, tried };
 }
