@@ -13,7 +13,8 @@
  *   UNTIS_SERVER    z. B. "nessa.webuntis.com" (steht in der Adresszeile von WebUntis)
  *   UNTIS_SCHOOL    optional: Schulname wie beim WebUntis-Login; leer = wird automatisch gesucht
  *   UNTIS_USER      WebUntis-Benutzername des Kindes
- *   UNTIS_PASSWORD  WebUntis-Passwort des Kindes
+ *   UNTIS_PASSWORD  WebUntis-Passwort des Kindes (entfällt, wenn UNTIS_SECRET gesetzt ist)
+ *   UNTIS_SECRET    optional, empfohlen: Freigabe-Schlüssel für Untis Mobile (Profil → Freigaben)
  *   ITSL_ICAL_URL   itslearning-iCal-Link des Kindes (webcal:// oder https://)
  * Normale Variable (wrangler.toml): ALLOWED_ORIGIN
  */
@@ -116,6 +117,19 @@ async function untis(env, fetchFn, from, to) {
   const debug = {};
   let personId = null;
   let personType = 5;
+  // Bevorzugter Weg, wenn UNTIS_SECRET gesetzt ist: Anmeldung wie die Untis-Mobile-App
+  // (Benutzername + Einmalcode aus dem Freigabe-Schlüssel). Braucht kein Passwort.
+  if (env.UNTIS_SECRET) {
+    try {
+      const r = await secretLogin(base, school, schoolCookie, env.UNTIS_USER, env.UNTIS_SECRET, fetchFn);
+      session = r.session; personId = r.personId; personType = r.personType || 5;
+      debug.login = 'secret';
+    } catch (e) {
+      debug.secretLoginError = String(e.message || e);
+      if (!env.UNTIS_PASSWORD) throw new Error('WebUntis (Schlüssel): ' + debug.secretLoginError);
+    }
+  }
+  if (!session) {
   // Erster Weg: JSON-RPC authenticate. Scheitert bei manchen Konten mit einem internen Serverfehler
   // (z. B. „Index 1 out of bounds“), obwohl der Login auf der Webseite klappt.
   try {
@@ -136,6 +150,7 @@ async function untis(env, fetchFn, from, to) {
     } catch (e2) {
       throw new Error(`${rpcError} · Web-Anmeldung: ${String(e2.message || e2)}`);
     }
+  }
   }
 
   const out = { lessons: [], homework: [], exams: [] };
@@ -158,7 +173,10 @@ async function untis(env, fetchFn, from, to) {
   }
   debug.personType = personType;
   debug.hasPersonId = !!personId;
-  if (!personId) throw new Error(`WebUntis: angemeldet, aber Schüler-ID nicht gefunden (${debug.personIdSources})`);
+  if (!personId) {
+    const hint = env.UNTIS_SECRET ? ` · Schlüssel-Login: ${debug.secretLoginError || '?'}` : ' · Tipp: UNTIS_SECRET eintragen';
+    throw new Error(`WebUntis: angemeldet, aber Schüler-ID nicht gefunden (${debug.personIdSources})${hint}`);
+  }
   const rest = async path => {
     const headers = { Cookie: cookie(), Accept: 'application/json' };
     if (bearer) {
@@ -246,6 +264,51 @@ export async function webLogin(base, school, schoolCookie, user, password, fetch
   if (/loginError|bad credentials|invalid/i.test(text)) throw new Error('Benutzername oder Passwort falsch');
   if (!m) throw new Error(`keine Sitzung erhalten (HTTP ${res.status})`);
   return m[1];
+}
+
+/* Anmeldung wie die Untis-Mobile-App: Benutzername + zeitbasierter Einmalcode (TOTP) aus dem
+ * Freigabe-Schlüssel (WebUntis → Profil → Freigaben → Untis Mobile). Akzeptiert den Schlüssel
+ * selbst oder den kompletten untis://-Link. Gibt { session, personId, personType } zurück. */
+export async function secretLogin(base, school, schoolCookie, user, secret, fetchFn = fetch, now = Date.now()) {
+  const keyMatch = String(secret).match(/[?&]key=([^&]+)/i);
+  const userMatch = String(secret).match(/[?&]user=([^&]+)/i);
+  const key = keyMatch ? decodeURIComponent(keyMatch[1]) : String(secret);
+  const loginUser = user || (userMatch ? decodeURIComponent(userMatch[1]) : '');
+  const otp = await totp(key, now);
+  const res = await fetchFn(`${base}/jsonrpc_intern.do?m=getUserData2017&school=${encodeURIComponent(school)}&v=i2.2`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: schoolCookie },
+    body: JSON.stringify({ id: 'lb', method: 'getUserData2017', params: [{ auth: { clientTime: now, user: loginUser, otp } }], jsonrpc: '2.0' })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (data.error) throw new Error(String(data.error.message || data.error.code));
+  const r = data.result;
+  if (!r || r.code) throw new Error('Anmeldung abgelehnt' + (r && r.code ? ` (Code ${r.code})` : ` (HTTP ${res.status})`));
+  const setCookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [res.headers.get('set-cookie') || ''];
+  const m = setCookies.join(';').match(/JSESSIONID=([^;,\s]+)/);
+  if (!m) throw new Error('keine Sitzung erhalten');
+  const u = r.userData || {};
+  const types = { CLASS: 1, TEACHER: 2, SUBJECT: 3, ROOM: 4, STUDENT: 5 };
+  return { session: m[1], personId: u.elemId || null, personType: types[u.elemType] || Number(u.elemType) || 5 };
+}
+
+/* Zeitbasierter Einmalcode nach RFC 6238 (30 s, 6 Stellen, SHA-1), Schlüssel in Base32. */
+export async function totp(base32, now = Date.now()) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const clean = String(base32).toUpperCase().replace(/[^A-Z2-7]/g, '');
+  let bits = '';
+  for (const ch of clean) bits += alphabet.indexOf(ch).toString(2).padStart(5, '0');
+  const bytes = new Uint8Array(Math.floor(bits.length / 8));
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(bits.slice(i * 8, i * 8 + 8), 2);
+  const counter = Math.floor(now / 1000 / 30);
+  const msg = new Uint8Array(8);
+  let c = counter;
+  for (let i = 7; i >= 0; i--) { msg[i] = c & 0xff; c = Math.floor(c / 256); }
+  const k = await crypto.subtle.importKey('raw', bytes, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const h = new Uint8Array(await crypto.subtle.sign('HMAC', k, msg));
+  const o = h[h.length - 1] & 0xf;
+  const code = ((h[o] & 0x7f) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3];
+  return String(code % 1000000).padStart(6, '0');
 }
 
 /* Schüler-ID nach Web-Anmeldung. WebUntis legt sie je nach Version an verschiedenen Stellen ab,

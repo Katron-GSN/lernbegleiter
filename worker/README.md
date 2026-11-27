@@ -31,10 +31,22 @@ Beim Worker unter **Einstellungen → Variablen und Geheimnisse** diese Einträg
 | `UNTIS_SERVER` | Der Servername aus der WebUntis-Adresszeile, z. B. `nessa.webuntis.com` |
 | `UNTIS_SCHOOL` | Optional. Leer lassen, dann sucht der Dienst die Schule selbst. Nur nötig, wenn die App „Schule nicht gefunden“ meldet. |
 | `UNTIS_USER` | WebUntis-Benutzername des Kindes |
-| `UNTIS_PASSWORD` | WebUntis-Passwort des Kindes |
+| `UNTIS_PASSWORD` | WebUntis-Passwort des Kindes. Entfällt, wenn `UNTIS_SECRET` gesetzt ist. |
+| `UNTIS_SECRET` | Empfohlen. Freigabe-Schlüssel für Untis Mobile, siehe unten. |
 | `ITSL_ICAL_URL` | iCal-Link des Kindes aus itslearning (Kalender → iCal-Feed abrufen) |
 
 Danach erneut **Bereitstellen**. Die Adresse des Dienstes steht oben beim Worker, z. B. `https://lernbegleiter-sync.<name>.workers.dev`.
+
+### Freigabe-Schlüssel (`UNTIS_SECRET`)
+
+Bei manchen Konten klappt die Anmeldung mit Passwort nicht. Zuverlässiger ist der Schlüssel, mit dem sich auch die Untis-Mobile-App verbindet:
+
+1. Mit dem Konto des Kindes auf der WebUntis-Webseite anmelden (am Computer).
+2. Oben rechts auf das Profil → Reiter **Freigaben** → bei **Zugriff über Untis Mobile** auf **Anzeigen**.
+3. Unter dem QR-Code steht ein Schlüssel (Buchstaben und Ziffern), manchmal auch ein Link, der mit `untis://` beginnt. Beides funktioniert.
+4. Diesen Wert bei Cloudflare als Geheimnis `UNTIS_SECRET` eintragen. Er wirkt wie ein Passwort und gehört nirgendwo anders hin.
+
+Fehlt der Punkt **Freigaben**, hat die Schule diese Funktion für Schülerkonten abgeschaltet.
 
 ## 4. In der App verbinden
 
