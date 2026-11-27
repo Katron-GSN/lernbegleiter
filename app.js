@@ -115,6 +115,14 @@ function normalize(data) {
   s.settings = Object.assign(defaultState().settings, data.settings || {});
   s.equipped = Object.assign({ ...DEFAULT_EQUIPPED }, data.equipped || {});
   s.stickers ||= {}; s.badges ||= {}; s.games ||= {};
+  // Früher stand der ganze ZP-Henne-Link (mit ?k=) im Adressfeld: Schlüssel herauslösen
+  if (!s.settings.henneToken && /[?&]k=/.test(s.settings.henneUrl || '')) {
+    try {
+      const u = new URL(s.settings.henneUrl);
+      const k = u.searchParams.get('k');
+      if (k && /^[a-f0-9]{32,128}$/i.test(k)) { s.settings.henneToken = k; s.settings.henneUrl = u.origin + u.pathname; }
+    } catch { /* ungültige Adresse, ignorieren */ }
+  }
   return s;
 }
 function load() {
@@ -2068,5 +2076,9 @@ render();
 autoSync();
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {}));
+  // Sobald eine neue Version übernimmt, einmal neu laden, damit sie sofort zu sehen ist
+  let reloaded = false;
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
 }
