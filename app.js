@@ -12,7 +12,9 @@ const WD_SHORT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
 const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 const MONTHS_LONG = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
 const COLORS = ['#f87171', '#fb923c', '#facc15', '#a3e635', '#34d399', '#22d3ee', '#60a5fa', '#818cf8', '#c084fc', '#f472b6', '#94a3b8', '#e2e8f0'];
-const EVENT_TYPES = ['Klassenarbeit', 'Test', 'Referat', 'Abgabe', 'Sonstiges'];
+const EVENT_TYPES = ['Klassenarbeit', 'Test', 'Prüfung', 'Referat', 'Abgabe', 'Sonstiges'];
+const EXAM_TYPES = ['Klassenarbeit', 'Test', 'Prüfung'];
+const isExam = e => EXAM_TYPES.includes(e.type);
 
 const XP = { ranzen: 5, briefing: 5, hwDone: 10, hwOnTime: 5, hwSelf: 5, dayGoal: 20, weekGoal: 50 };
 const STREAK_BONUS_FROM = 5;
@@ -326,10 +328,10 @@ function quoteOfDay(s = todayISO()) {
   // Test heute (vor Schulschluss) oder am nächsten Schultag
   const evName = e => { const sb = subjectById(e.subjectId); return e.type + (sb ? ' in ' + sb.name : ''); };
   const hour = new Date().getHours();
-  const todayEv = S.events.find(e => e.date === s && ['Klassenarbeit', 'Test'].includes(e.type));
+  const todayEv = S.events.find(e => e.date === s && isExam(e));
   if (todayEv && hour < S.settings.afterSchoolHour) return fill(pickFrom(QUOTES.testToday, 'tt' + start, dayN), { was: evName(todayEv) });
   const next = nextSchoolDay(s);
-  const nextEv = S.events.find(e => e.date === next && ['Klassenarbeit', 'Test'].includes(e.type));
+  const nextEv = S.events.find(e => e.date === next && isExam(e));
   if (nextEv) {
     const wann = diffDays(s, next) === 1 ? 'Morgen' : 'Am ' + WEEKDAYS[parse(next).getDay()];
     return fill(pickFrom(QUOTES.testSoon, 'ts' + start, dayN), { wann, was: evName(nextEv) });
@@ -517,7 +519,7 @@ function nextChooser(a, t, rec) {
 /* Für welches Fach steht bald eine Arbeit oder ein Test an? */
 function testFor(subjectId, from, days = 7) {
   if (!subjectId) return null;
-  return S.events.filter(e => e.subjectId === subjectId && ['Klassenarbeit', 'Test'].includes(e.type) && e.date >= from && diffDays(from, e.date) <= days)
+  return S.events.filter(e => e.subjectId === subjectId && isExam(e) && e.date >= from && diffDays(from, e.date) <= days)
     .sort((a, b) => a.date.localeCompare(b.date))[0] || null;
 }
 const subjTag = s => s ? `<span class="subj-tag" style="--c:${esc(s.color)}">${esc(s.name)}</span>` : '';
@@ -543,7 +545,7 @@ function nextCard(t, rec) {
     const ev = testFor(a.h.subjectId, todayISO());
     label = a.label;
     title = subjTag(s) + esc(a.h.text);
-    meta = `fällig ${esc(relDay(a.h.due))}${a.h.source ? ' · aus ' + (a.h.source === 'webuntis' ? 'WebUntis' : 'itslearning') : ''}`;
+    meta = `fällig ${esc(relDay(a.h.due))}${a.h.source ? ' · aus ' + (a.h.source === 'webuntis' ? 'WebUntis' : 'itslearning') : a.h.plan ? ' · Lernplan' : ''}`;
     if (ev) { const rd = relDay(ev.date); extra = `<div><span class="countdown ${diffDays(todayISO(), ev.date) <= 1 ? 'now' : 'soon'}">${esc(ev.type)} ${rd === 'heute' || rd === 'morgen' || rd === 'übermorgen' || rd.startsWith('in ') ? esc(rd) : 'am ' + esc(rd)}</span></div>`; }
     buttons = `<button class="btn small primary" data-action="hw-toggle" data-id="${esc(a.h.id)}">${ICON.check} Erledigt</button>`;
   } else if (a.kind === 'ranzen') {
@@ -590,7 +592,7 @@ function nextCard(t, rec) {
 /* Eine Unterrichtsstunde im Stil der Stundenkarten. */
 function lessonRow(l, date, compact = false) {
   const first = !compact && lessonsOn(date).find(x => x.subj.id === l.subj.id && x.status !== 'cancelled') ;
-  const ev = first && first.nr === l.nr && l.status !== 'cancelled' && S.events.find(e => e.date === date && e.subjectId === l.subj.id && ['Klassenarbeit', 'Test'].includes(e.type));
+  const ev = first && first.nr === l.nr && l.status !== 'cancelled' && S.events.find(e => e.date === date && e.subjectId === l.subj.id && isExam(e));
   const pill = l.status === 'cancelled' ? '<span class="pill p-bad">fällt aus</span>'
     : ev ? `<span class="pill p-grad">${esc(ev.type)}</span>`
     : l.status === 'changed' ? '<span class="pill p-warn">geändert</span>' : '';
@@ -619,7 +621,7 @@ function viewToday() {
   const open = S.homework.filter(h => !h.doneAt).sort((a, b) => a.due.localeCompare(b.due));
   const shownHw = open.filter(h => diffDays(today, h.due) <= 7);
   const events = S.events.filter(e => e.date >= today && diffDays(today, e.date) <= 14).sort((a, b) => a.date.localeCompare(b.date));
-  const tests = S.events.filter(e => e.date >= today && diffDays(today, e.date) <= 7 && ['Klassenarbeit', 'Test'].includes(e.type)).length;
+  const tests = S.events.filter(e => e.date >= today && diffDays(today, e.date) <= 7 && isExam(e)).length;
   const tLower = t.label === 'Heute' ? 'heute' : t.label === 'Morgen' ? 'morgen' : t.label;
   const lv = levelInfo();
   const st = streakInfo();
@@ -700,7 +702,7 @@ function hwRow(h) {
     <button class="box" data-action="hw-toggle" data-id="${esc(h.id)}" aria-label="${done ? 'Als offen markieren' : 'Erledigt'}">${boxMark(done)}</button>
     <div class="hw-main">
       <div class="text">${esc(h.text)}</div>
-      <div class="sub">${esc(s ? s.name : 'Sonstiges')}${h.source ? ` · <span class="src">${h.source === 'webuntis' ? 'WebUntis' : 'itslearning'}</span>` : ''} · <span class="${done ? '' : dueClass(h.due)}">fällig ${esc(relDay(h.due))}</span></div>
+      <div class="sub">${esc(s ? s.name : 'Sonstiges')}${h.source ? ` · <span class="src">${h.source === 'webuntis' ? 'WebUntis' : 'itslearning'}</span>` : h.plan ? ' · <span class="src">Lernplan</span>' : ''} · <span class="${done ? '' : dueClass(h.due)}">fällig ${esc(relDay(h.due))}</span></div>
     </div>
     <div class="row tight">${pill}<button class="icon-btn" data-action="hw-edit" data-id="${esc(h.id)}" aria-label="Bearbeiten">${ICON.edit}</button></div>
   </div>`;
@@ -716,6 +718,7 @@ function evRow(e) {
       <div class="muted small">${esc(e.topic || 'Kein Thema eingetragen')}</div>
     </div>
     <div class="row tight">${e.date >= todayISO() ? countdownBadge(e.date) : ''}
+      ${isExam(e) && e.date > todayISO() ? planButton(e) : ''}
       <button class="icon-btn" data-action="ev-edit" data-id="${esc(e.id)}" aria-label="Bearbeiten">${ICON.edit}</button></div>
   </div>`;
 }
@@ -821,6 +824,76 @@ function toggleHomework(id) {
   afterAction(g, 'Aufgabe erledigt');
 }
 
+/* ---------- Lernplan: rückwärts vom Prüfungstermin ---------- */
+
+const planItems = evId => S.homework.filter(h => h.plan === evId);
+
+function planButton(e) {
+  const items = planItems(e.id);
+  if (!items.length) return `<button class="btn small" data-action="plan-open" data-id="${esc(e.id)}">Lernplan</button>`;
+  const done = items.filter(h => h.doneAt).length;
+  return `<button class="btn small ${done === items.length ? '' : 'ghost'}" data-action="plan-open" data-id="${esc(e.id)}">Lernplan ${done}/${items.length}</button>`;
+}
+
+/* Verteilt die Einheiten auf die Tage vor dem Termin. Der letzte Tag bekommt immer den Probedurchlauf.
+ * Gibt es mehr Tage als Einheiten, beginnt der Plan höchstens doppelt so viele Tage vorher, wie es Einheiten gibt. */
+function buildPlan(e, topics, weekend) {
+  const subj = subjectById(e.subjectId);
+  const what = `${e.type}${subj ? ' ' + subj.name : ''}`;
+  const sessions = topics.map(t => `${what}: ${t} lernen`);
+  for (let i = 0; i < topics.length; i += 2) sessions.push(`${what}: ${topics.slice(i, i + 2).join(' und ')} wiederholen`);
+  sessions.push(`${what}: Probedurchlauf, alles einmal ohne Hilfen`);
+  const days = [];
+  for (let d = todayISO(); d < e.date; d = addDays(d, 1)) {
+    const wd = parse(d).getDay();
+    if (weekend || (wd !== 0 && wd !== 6)) days.push(d);
+  }
+  if (!days.length) return [];
+  const m = sessions.length;
+  const win = days.slice(-Math.min(days.length, m * 2));
+  const k = win.length;
+  return sessions.map((text, i) => ({ text, due: win[m === 1 ? k - 1 : m <= k ? Math.round(i * (k - 1) / (m - 1)) : Math.floor(i * k / m)] }));
+}
+
+function openPlanDialog(id) {
+  const e = S.events.find(x => x.id === id);
+  if (!e) return;
+  const plan = e.plan || { topics: e.topic ? [e.topic] : [], weekend: false };
+  const items = planItems(e.id).sort((a, b) => a.due.localeCompare(b.due));
+  const subj = subjectById(e.subjectId);
+  showDialog(`
+    <form method="dialog">
+      <h2>Lernplan: ${esc(e.type)}${subj ? ' ' + esc(subj.name) : ''}</h2>
+      <p class="muted small">${fmtDate(e.date)} · ${esc(relDay(e.date))}</p>
+      <label class="field">Was kommt dran? Ein Thema pro Zeile
+        <textarea name="topics" required placeholder="z. B. Quadratische Funktionen&#10;Satz des Pythagoras">${esc(plan.topics.join('\n'))}</textarea>
+      </label>
+      <label class="field toggle"><input type="checkbox" name="weekend" ${plan.weekend ? 'checked' : ''}> Auch am Wochenende lernen</label>
+      ${items.length ? `<div class="list plan-list">${items.map(h => `<div class="plan-row ${h.doneAt ? 'done' : ''}"><span class="tag">${esc(WD_SHORT[parse(h.due).getDay()])} ${parse(h.due).getDate()}.${parse(h.due).getMonth() + 1}.</span><span>${esc(h.text.replace(/^[^:]*: /, ''))}</span>${h.doneAt ? ICON.check : ''}</div>`).join('')}</div>
+        <p class="muted small">Neu planen ersetzt nur die offenen Einheiten. Erledigtes bleibt erledigt.</p>` : `<p class="muted small">Die App legt für jedes Thema eine Lerneinheit an, dazu Wiederholungen und am letzten Tag einen Probedurchlauf. Die Einheiten erscheinen als Aufgaben unter „Heute“ und geben XP wie Hausaufgaben.</p>`}
+      <div class="row end">
+        ${items.length ? `<button type="button" class="btn danger ghost" data-action="plan-delete" data-id="${esc(e.id)}">Plan löschen</button><span class="spacer"></span>` : ''}
+        <button type="button" class="btn ghost" data-close>Abbrechen</button>
+        <button class="btn primary" value="ok">${items.length ? 'Neu planen' : 'Plan erstellen'}</button>
+      </div>
+    </form>`, form => {
+    const d = new FormData(form);
+    const topics = String(d.get('topics') || '').split('\n').map(x => x.trim()).filter(Boolean);
+    if (!topics.length) return false;
+    const weekend = !!d.get('weekend');
+    const sessions = buildPlan(e, topics, weekend);
+    if (!sessions.length) { toast('Bis zum Termin ist kein Lerntag mehr frei.'); return false; }
+    const doneTexts = new Set(planItems(e.id).filter(h => h.doneAt).map(h => h.text));
+    S.homework = S.homework.filter(h => h.plan !== e.id || h.doneAt);
+    const fresh = sessions.filter(x => !doneTexts.has(x.text));
+    fresh.forEach(x => S.homework.push({ id: uid(), created: todayISO(), self: false, doneAt: null, plan: e.id, subjectId: e.subjectId, text: x.text, due: x.due }));
+    e.plan = { topics, weekend };
+    save(); render();
+    toast(`${fresh.length} Lerneinheiten geplant, die erste ${relDay(fresh[0]?.due || e.date)}.`);
+    return true;
+  });
+}
+
 /* ---------- Ansicht: Termine (eigener Schulkalender) ---------- */
 
 function viewEvents() {
@@ -842,7 +915,7 @@ function viewEvents() {
       <div class="card-head"><h2>Vorbei</h2></div>
       <div class="list">${past.map(evRow).join('')}</div>
     </section>` : ''}
-    <p class="muted small">WebUntis gibt Prüfungstermine für Schülerkonten nicht heraus. Deshalb trägst du sie hier selbst ein. Am Tag davor erinnert dich der Spruch des Tages.</p>
+    <p class="muted small">WebUntis gibt Prüfungstermine für Schülerkonten nicht heraus. Deshalb trägst du sie hier selbst ein. Für Klassenarbeiten, Tests und Prüfungen gibt es einen Lernplan: Themen eintragen, die App verteilt die Lerneinheiten rückwärts vom Termin aus.</p>
   </div>`;
 }
 
@@ -1531,9 +1604,18 @@ document.addEventListener('click', ev => {
       dlg.close(); save(); render(); toast('Gelöscht');
       break;
     case 'ev-new': openEventDialog(); break;
+    case 'plan-open': openPlanDialog(id); break;
+    case 'plan-delete': {
+      const ev = S.events.find(x => x.id === id);
+      S.homework = S.homework.filter(h => h.plan !== id || h.doneAt);
+      if (ev) delete ev.plan;
+      dlg.close(); save(); render(); toast('Lernplan gelöscht');
+      break;
+    }
     case 'ev-edit': openEventDialog(id); break;
     case 'ev-delete':
       S.events = S.events.filter(e => e.id !== id);
+      S.homework = S.homework.filter(h => h.plan !== id || h.doneAt);
       dlg.close(); save(); render(); toast('Termin gelöscht');
       break;
     case 'subj-new': openSubjectDialog(); break;
