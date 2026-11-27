@@ -12,9 +12,9 @@
  *   APP_KEY         beliebiges langes Passwort, das auch in der App eingetragen wird
  *   UNTIS_SERVER    z. B. "nessa.webuntis.com" (steht in der Adresszeile von WebUntis)
  *   UNTIS_SCHOOL    optional: Schulname wie beim WebUntis-Login; leer = wird automatisch gesucht
- *   UNTIS_USER      Pauls WebUntis-Benutzername
- *   UNTIS_PASSWORD  Pauls WebUntis-Passwort
- *   ITSL_ICAL_URL   Pauls itslearning-iCal-Link (webcal:// oder https://)
+ *   UNTIS_USER      WebUntis-Benutzername des Kindes
+ *   UNTIS_PASSWORD  WebUntis-Passwort des Kindes
+ *   ITSL_ICAL_URL   itslearning-iCal-Link des Kindes (webcal:// oder https://)
  * Normale Variable (wrangler.toml): ALLOWED_ORIGIN
  */
 
@@ -189,7 +189,7 @@ async function untis(env, fetchFn, from, to) {
       const list = await rpc('getExams', { startDate: untisDate(now0()), endDate: untisDate(addDays(now0(), 90)), examTypeId: 0 });
       out.exams = mapExams({ data: { exams: (list || []).map(x => ({ id: x.id, examDate: x.date, subject: x.subject, name: x.name || '', examType: x.name || '', text: x.text || '' })) } });
     } catch (e2) {
-      // 403 = Schule gibt Prüfungstermine für Schülerkonten nicht frei. Kein Fehler, Termine trägt Paul selbst ein.
+      // 403 = Schule gibt Prüfungstermine für Schülerkonten nicht frei. Kein Fehler, Termine trägt das Kind selbst ein.
       if (/403/.test(String(e.message))) debug.examsBlocked = true;
       else errors.push({ source: 'webuntis-pruefungen', message: String(e.message || e) });
     }
